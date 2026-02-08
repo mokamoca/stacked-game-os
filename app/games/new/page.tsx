@@ -25,7 +25,7 @@ export default function NewGamePage({ searchParams }: Props) {
 
         <label className="field">
           <span>Mood tags</span>
-          <input name="mood_tags" placeholder="chill, story, brain-off" />
+          <input name="tags" placeholder="chill, story, brain-off" />
         </label>
 
         <div className="row">

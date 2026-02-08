@@ -22,7 +22,7 @@ export default async function GamesPage({ searchParams }: Props) {
 
   const { data, error } = await supabase
     .from("games")
-    .select("id,user_id,title,platform,mood_tags,created_at")
+    .select("id,user_id,title,platform,tags,created_at")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -51,7 +51,9 @@ export default async function GamesPage({ searchParams }: Props) {
                 <div>
                   <h3>{game.title}</h3>
                   <p className="muted">{game.platform}</p>
-                  <p className="chipLine">tags: {game.mood_tags || "-"}</p>
+                  <p className="chipLine">
+                    tags: {Array.isArray(game.tags) && game.tags.length > 0 ? game.tags.join(", ") : "なし"}
+                  </p>
                 </div>
                 <div className="row">
                   <Link href={`/games/${game.id}/edit`} className="button">

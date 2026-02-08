@@ -24,7 +24,7 @@ export default async function EditGamePage({ params, searchParams }: Props) {
 
   const { data: game, error } = await supabase
     .from("games")
-    .select("id,title,platform,mood_tags")
+    .select("id,title,platform,tags")
     .eq("id", params.id)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -36,6 +36,8 @@ export default async function EditGamePage({ params, searchParams }: Props) {
   if (!game) {
     notFound();
   }
+
+  const tagText = Array.isArray(game.tags) ? game.tags.join(", ") : "";
 
   return (
     <section className="card narrow">
@@ -56,7 +58,7 @@ export default async function EditGamePage({ params, searchParams }: Props) {
 
         <label className="field">
           <span>Mood tags</span>
-          <input name="mood_tags" defaultValue={game.mood_tags} />
+          <input name="tags" defaultValue={tagText} />
         </label>
 
         <div className="row">

@@ -2,6 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { parseTags } from "@/lib/tags";
 
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -24,7 +25,7 @@ async function getUserOrRedirect() {
 export async function createGameAction(formData: FormData) {
   const title = getString(formData, "title");
   const platform = getString(formData, "platform");
-  const moodTags = getString(formData, "mood_tags");
+  const tags = parseTags(getString(formData, "tags"));
 
   if (!title || !platform) {
     redirect("/games/new?error=Title+and+platform+are+required");
@@ -36,7 +37,7 @@ export async function createGameAction(formData: FormData) {
     user_id: user.id,
     title,
     platform,
-    mood_tags: moodTags
+    tags
   });
 
   if (error) {
@@ -50,7 +51,7 @@ export async function updateGameAction(formData: FormData) {
   const id = getString(formData, "id");
   const title = getString(formData, "title");
   const platform = getString(formData, "platform");
-  const moodTags = getString(formData, "mood_tags");
+  const tags = parseTags(getString(formData, "tags"));
 
   if (!id || !title || !platform) {
     redirect("/games?error=Invalid+input");
@@ -60,7 +61,7 @@ export async function updateGameAction(formData: FormData) {
 
   const { error } = await supabase
     .from("games")
-    .update({ title, platform, mood_tags: moodTags })
+    .update({ title, platform, tags })
     .eq("id", id)
     .eq("user_id", user.id);
 

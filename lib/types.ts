@@ -10,7 +10,7 @@ export type Game = {
   user_id: string;
   title: string;
   platform: string;
-  mood_tags: string;
+  tags: string[];
   created_at: string;
 };
 

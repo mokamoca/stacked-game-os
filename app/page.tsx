@@ -1,7 +1,6 @@
 ﻿import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { recommendGames } from "@/lib/recommend";
-import type { Game, Interaction } from "@/lib/types";
+import type { Game } from "@/lib/types";
 import { interactionAction } from "@/app/dashboard-actions";
 
 type Props = {
@@ -23,30 +22,16 @@ async function recordShownInteractions(params: {
   if (gameIds.length === 0) return;
 
   const supabase = createClient();
-  const since = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+  const toInsert = gameIds.map((gameId) => ({
+    user_id: userId,
+    game_id: gameId,
+    action: "shown",
+    time_bucket: timeBucket,
+    context_tags: moodTags
+  }));
 
-  const { data: recentShown } = await supabase
-    .from("interactions")
-    .select("game_id")
-    .eq("user_id", userId)
-    .eq("action", "shown")
-    .in("game_id", gameIds)
-    .gte("created_at", since);
-
-  const shownSet = new Set((recentShown ?? []).map((item) => item.game_id as string));
-  const toInsert = gameIds
-    .filter((gameId) => !shownSet.has(gameId))
-    .map((gameId) => ({
-      user_id: userId,
-      game_id: gameId,
-      action: "shown",
-      time_bucket: timeBucket,
-      context_tags: moodTags
-    }));
-
-  if (toInsert.length > 0) {
-    await supabase.from("interactions").insert(toInsert);
-  }
+  // Non-blocking: shown logging must not break dashboard rendering.
+  await supabase.from("interactions").insert(toInsert);
 }
 
 function parseTimeBucket(raw?: string): number {
@@ -68,25 +53,24 @@ export default async function DashboardPage({ searchParams }: Props) {
   const mood = (searchParams.mood ?? "").trim();
   const timeBucket = parseTimeBucket(searchParams.time);
 
-  const { data: gamesData, error: gamesError } = await supabase
+  const { count: gamesCount, error: gamesError } = await supabase
     .from("games")
-    .select("id,user_id,title,platform,mood_tags,created_at")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
 
-  const { data: interactionsData } = await supabase
-    .from("interactions")
-    .select("id,user_id,game_id,action,time_bucket,context_tags,created_at")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
+  const { data: recommendedData, error: recommendedError } = await supabase.rpc(
+    "recommend_games",
+    {
+      p_mood_tags: mood,
+      p_limit: 3
+    }
+  );
 
-  const games = (gamesData ?? []) as Game[];
-  const interactions = (interactionsData ?? []) as Interaction[];
-  const recommendations = recommendGames({ games, interactions, moodTags: mood });
+  const recommendations = (recommendedData ?? []) as Game[];
 
   await recordShownInteractions({
     userId: user.id,
-    gameIds: recommendations.map((item) => item.game.id),
+    gameIds: recommendations.map((item) => item.id),
     timeBucket,
     moodTags: mood
   });
@@ -102,6 +86,7 @@ export default async function DashboardPage({ searchParams }: Props) {
         {searchParams.message ? <p className="notice ok">{searchParams.message}</p> : null}
         {searchParams.error ? <p className="notice error">{searchParams.error}</p> : null}
         {gamesError ? <p className="notice error">{gamesError.message}</p> : null}
+        {recommendedError ? <p className="notice error">{recommendedError.message}</p> : null}
 
         <form method="GET" className="rowWrap">
           <label className="field grow">
@@ -127,7 +112,7 @@ export default async function DashboardPage({ searchParams }: Props) {
 
       <section>
         <h2>今日のおすすめ</h2>
-        {games.length === 0 ? (
+        {(gamesCount ?? 0) === 0 ? (
           <p className="muted">
             ゲームが未登録です。<Link href="/games/new">/games/new</Link> から追加してください。
           </p>
@@ -135,11 +120,13 @@ export default async function DashboardPage({ searchParams }: Props) {
           <p className="muted">おすすめ対象がありません（dont_recommend設定済みの可能性があります）。</p>
         ) : (
           <div className="grid">
-            {recommendations.map((item) => (
-              <article key={item.game.id} className="card">
-                <h3>{item.game.title}</h3>
-                <p className="muted">{item.game.platform}</p>
-                <p className="chipLine">tags: {item.game.mood_tags || "-"}</p>
+            {recommendations.map((game) => (
+              <article key={game.id} className="card">
+                <h3>{game.title}</h3>
+                <p className="muted">{game.platform}</p>
+                <p className="chipLine">
+                  tags: {Array.isArray(game.tags) && game.tags.length > 0 ? game.tags.join(", ") : "なし"}
+                </p>
 
                 <div className="actionsGrid">
                   {[
@@ -149,7 +136,7 @@ export default async function DashboardPage({ searchParams }: Props) {
                     { action: "dont_recommend", label: "Don't recommend" }
                   ].map((entry) => (
                     <form key={entry.action} action={interactionAction}>
-                      <input type="hidden" name="game_id" value={item.game.id} />
+                      <input type="hidden" name="game_id" value={game.id} />
                       <input type="hidden" name="action" value={entry.action} />
                       <input type="hidden" name="time_bucket" value={String(timeBucket)} />
                       <input type="hidden" name="context_tags" value={mood} />

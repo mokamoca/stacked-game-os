@@ -1,4 +1,5 @@
-﻿import type { Game, Interaction } from "@/lib/types";
+import type { Game, Interaction } from "@/lib/types";
+import { parseTags } from "@/lib/tags";
 
 type Recommendation = {
   game: Game;
@@ -9,10 +10,18 @@ type Recommendation = {
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function normalizeTags(raw: string): string[] {
-  return raw
-    .split(",")
-    .map((tag) => tag.trim().toLowerCase())
-    .filter(Boolean);
+  return parseTags(raw);
+}
+
+function hasTagOverlap(currentTags: string[], rawContextTags: string): boolean {
+  if (currentTags.length === 0) return true;
+
+  const contextTags = parseTags(rawContextTags);
+  if (contextTags.length === 0) return true;
+
+  return currentTags.some((tag) =>
+    contextTags.some((contextTag) => contextTag.includes(tag) || tag.includes(contextTag))
+  );
 }
 
 export function recommendGames(params: {
@@ -47,6 +56,7 @@ export function recommendGames(params: {
 
     const playedRecently = history.some((item) => {
       if (item.action !== "played") return false;
+      if (!hasTagOverlap(moodTagList, item.context_tags)) return false;
       const diff = now - new Date(item.created_at).getTime();
       return diff <= 3 * DAY_MS;
     });
@@ -54,12 +64,13 @@ export function recommendGames(params: {
 
     const notNowRecently = history.some((item) => {
       if (item.action !== "not_now") return false;
+      if (!hasTagOverlap(moodTagList, item.context_tags)) return false;
       const diff = now - new Date(item.created_at).getTime();
       return diff <= 1 * DAY_MS;
     });
     if (notNowRecently) score -= 6;
 
-    const gameTags = normalizeTags(game.mood_tags);
+    const gameTags = game.tags;
     const matchedTagCount = moodTagList.filter((moodTag) =>
       gameTags.some((gameTag) => gameTag.includes(moodTag) || moodTag.includes(gameTag))
     ).length;
