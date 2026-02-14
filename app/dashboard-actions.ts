@@ -27,6 +27,9 @@ function safeReturnTo(raw: string): string {
 export async function interactionAction(formData: FormData) {
   const action = formData.get("action");
   const gameId = formData.get("game_id");
+  const externalSourceRaw = formData.get("external_source");
+  const externalGameIdRaw = formData.get("external_game_id");
+  const gameTitleSnapshotRaw = formData.get("game_title_snapshot");
   const timeBucketRaw = formData.get("time_bucket");
   const contextTagsRaw = formData.get("context_tags");
   const returnToRaw = formData.get("return_to");
@@ -35,16 +38,28 @@ export async function interactionAction(formData: FormData) {
     typeof returnToRaw === "string" ? safeReturnTo(returnToRaw) : "/";
 
   if (typeof action !== "string" || !ALLOWED_ACTIONS.includes(action as InteractionAction)) {
-    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=Invalid+action`);
+    redirect(
+      `${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent("不正なアクションです")}`
+    );
   }
 
   if (typeof gameId !== "string" || !gameId) {
-    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=Missing+game+id`);
+    const externalSource = typeof externalSourceRaw === "string" ? externalSourceRaw.trim() : "";
+    const externalGameId = typeof externalGameIdRaw === "string" ? externalGameIdRaw.trim() : "";
+    if (!externalSource || !externalGameId) {
+      redirect(
+        `${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent("ゲーム識別子が不足しています")}`
+      );
+    }
   }
 
   const timeBucket =
     typeof timeBucketRaw === "string" ? parseTimeBucket(timeBucketRaw) : 30;
   const contextTags = typeof contextTagsRaw === "string" ? contextTagsRaw.trim() : "";
+  const externalSource = typeof externalSourceRaw === "string" ? externalSourceRaw.trim() : "";
+  const externalGameId = typeof externalGameIdRaw === "string" ? externalGameIdRaw.trim() : "";
+  const gameTitleSnapshot = typeof gameTitleSnapshotRaw === "string" ? gameTitleSnapshotRaw.trim() : "";
+  const normalizedGameId = typeof gameId === "string" && gameId.trim() ? gameId.trim() : null;
 
   const supabase = createClient();
   const {
@@ -57,7 +72,10 @@ export async function interactionAction(formData: FormData) {
 
   const { error } = await supabase.from("interactions").insert({
     user_id: user.id,
-    game_id: gameId,
+    game_id: normalizedGameId,
+    external_source: externalSource,
+    external_game_id: externalGameId,
+    game_title_snapshot: gameTitleSnapshot,
     action,
     time_bucket: timeBucket,
     context_tags: contextTags
@@ -69,5 +87,5 @@ export async function interactionAction(formData: FormData) {
     );
   }
 
-  redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}message=Saved`);
+  redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}message=${encodeURIComponent("保存しました")}`);
 }

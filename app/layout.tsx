@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
   title: "Stacked Game OS",
-  description: "Pick today's game from your backlog"
+  description: "外部ゲームDBから今日の1本を見つける"
 };
 
 export default async function RootLayout({
@@ -29,14 +29,14 @@ export default async function RootLayout({
             <nav className="nav">
               {user ? (
                 <>
-                  <Link href="/">Dashboard</Link>
-                  <Link href="/games">Games</Link>
-                  <Link href="/logout">Logout</Link>
+                  <Link href="/">おすすめ</Link>
+                  <Link href="/logout">ログアウト</Link>
+                  <Link href="/games">マイゲーム（任意）</Link>
                 </>
               ) : (
                 <>
-                  <Link href="/login">Login</Link>
-                  <Link href="/signup">Signup</Link>
+                  <Link href="/login">ログイン</Link>
+                  <Link href="/signup">新規登録</Link>
                 </>
               )}
             </nav>

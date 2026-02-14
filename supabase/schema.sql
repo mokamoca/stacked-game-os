@@ -20,6 +20,7 @@ create table if not exists public.games (
   title text not null,
   platform text not null,
   tags text[] not null default '{}'::text[],
+  genre_tags text[] not null default '{}'::text[],
   mood_tags text,
   created_at timestamptz not null default now()
 );
@@ -29,6 +30,9 @@ alter table public.games
 
 alter table public.games
   add column if not exists mood_tags text;
+
+alter table public.games
+  add column if not exists genre_tags text[] not null default '{}'::text[];
 
 -- Optional one-time migration for legacy rows.
 update public.games
@@ -46,20 +50,38 @@ where coalesce(array_length(tags, 1), 0) = 0
 create table if not exists public.interactions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  game_id uuid not null references public.games(id) on delete cascade,
+  game_id uuid references public.games(id) on delete cascade,
+  external_source text not null default '',
+  external_game_id text not null default '',
+  game_title_snapshot text not null default '',
   action text not null check (action in ('like', 'played', 'not_now', 'dont_recommend', 'shown')),
   time_bucket int not null default 30,
   context_tags text not null default '',
   created_at timestamptz not null default now()
 );
 
+alter table public.interactions
+  alter column game_id drop not null;
+
+alter table public.interactions
+  add column if not exists external_source text not null default '';
+
+alter table public.interactions
+  add column if not exists external_game_id text not null default '';
+
+alter table public.interactions
+  add column if not exists game_title_snapshot text not null default '';
+
 create index if not exists idx_games_user_id on public.games(user_id);
 create index if not exists idx_interactions_user_id on public.interactions(user_id);
 create index if not exists idx_interactions_game_id on public.interactions(game_id);
+create index if not exists idx_interactions_external_game on public.interactions(user_id, external_source, external_game_id);
 create index if not exists idx_interactions_created_at on public.interactions(created_at desc);
 
 create or replace function public.recommend_games(
   p_mood_tags text default '',
+  p_platforms text default '',
+  p_genres text default '',
   p_limit int default 3
 )
 returns table (
@@ -68,6 +90,7 @@ returns table (
   title text,
   platform text,
   tags text[],
+  genre_tags text[],
   created_at timestamptz
 )
 language sql
@@ -76,8 +99,14 @@ as $$
   with mood as (
     select public.parse_tags(p_mood_tags) as tags
   ),
+  platforms as (
+    select public.parse_tags(p_platforms) as tags
+  ),
+  genres as (
+    select public.parse_tags(p_genres) as tags
+  ),
   user_games as (
-    select g.id, g.user_id, g.title, g.platform, g.tags, g.created_at
+    select g.id, g.user_id, g.title, g.platform, g.tags, g.genre_tags, g.created_at
     from public.games g
     where g.user_id = auth.uid()
   ),
@@ -112,11 +141,22 @@ as $$
     g.title,
     g.platform,
     g.tags,
+    g.genre_tags,
     g.created_at
   from user_games g
   left join interactions_agg ia on ia.game_id = g.id
   cross join mood m
+  cross join platforms p
+  cross join genres ge
   where coalesce(ia.has_dont_recommend, false) = false
+    and (
+      cardinality(p.tags) = 0
+      or public.parse_tags(g.platform) && p.tags
+    )
+    and (
+      cardinality(ge.tags) = 0
+      or g.genre_tags && ge.tags
+    )
   order by
     (
       coalesce(ia.like_count, 0) * 10
@@ -191,11 +231,20 @@ create policy interactions_insert_own
   for insert
   with check (
     auth.uid() = user_id
-    and exists (
-      select 1
-      from public.games g
-      where g.id = game_id
-        and g.user_id = auth.uid()
+    and (
+      (
+        game_id is not null
+        and exists (
+          select 1
+          from public.games g
+          where g.id = game_id
+            and g.user_id = auth.uid()
+        )
+      )
+      or (
+        coalesce(trim(external_source), '') <> ''
+        and coalesce(trim(external_game_id), '') <> ''
+      )
     )
   );
 
@@ -206,11 +255,20 @@ create policy interactions_update_own
   using (auth.uid() = user_id)
   with check (
     auth.uid() = user_id
-    and exists (
-      select 1
-      from public.games g
-      where g.id = game_id
-        and g.user_id = auth.uid()
+    and (
+      (
+        game_id is not null
+        and exists (
+          select 1
+          from public.games g
+          where g.id = game_id
+            and g.user_id = auth.uid()
+        )
+      )
+      or (
+        coalesce(trim(external_source), '') <> ''
+        and coalesce(trim(external_game_id), '') <> ''
+      )
     )
   );
 

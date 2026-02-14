@@ -22,7 +22,7 @@ export default async function GamesPage({ searchParams }: Props) {
 
   const { data, error } = await supabase
     .from("games")
-    .select("id,user_id,title,platform,tags,created_at")
+    .select("id,user_id,title,platform,tags,genre_tags,created_at")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -31,11 +31,12 @@ export default async function GamesPage({ searchParams }: Props) {
   return (
     <section className="stack">
       <div className="rowBetween">
-        <h1>Games</h1>
+        <h1>ゲーム一覧</h1>
         <Link href="/games/new" className="button primary">
-          Add game
+          追加
         </Link>
       </div>
+      <p className="muted">この画面は任意のマイゲーム管理用です。おすすめ表示はダッシュボードで外部DBから取得します。</p>
 
       {searchParams.message ? <p className="notice ok">{searchParams.message}</p> : null}
       {searchParams.error ? <p className="notice error">{searchParams.error}</p> : null}
@@ -52,17 +53,21 @@ export default async function GamesPage({ searchParams }: Props) {
                   <h3>{game.title}</h3>
                   <p className="muted">{game.platform}</p>
                   <p className="chipLine">
-                    tags: {Array.isArray(game.tags) && game.tags.length > 0 ? game.tags.join(", ") : "なし"}
+                    気分: {Array.isArray(game.tags) && game.tags.length > 0 ? game.tags.join(", ") : "なし"}
+                  </p>
+                  <p className="chipLine">
+                    ジャンル:{" "}
+                    {Array.isArray(game.genre_tags) && game.genre_tags.length > 0 ? game.genre_tags.join(", ") : "なし"}
                   </p>
                 </div>
                 <div className="row">
                   <Link href={`/games/${game.id}/edit`} className="button">
-                    Edit
+                    編集
                   </Link>
                   <form action={deleteGameAction}>
                     <input type="hidden" name="id" value={game.id} />
                     <button type="submit" className="button danger">
-                      Delete
+                      削除
                     </button>
                   </form>
                 </div>

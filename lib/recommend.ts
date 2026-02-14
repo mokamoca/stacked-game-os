@@ -35,6 +35,7 @@ export function recommendGames(params: {
 
   const byGame = new Map<string, Interaction[]>();
   for (const interaction of interactions) {
+    if (!interaction.game_id) continue;
     const current = byGame.get(interaction.game_id) ?? [];
     current.push(interaction);
     byGame.set(interaction.game_id, current);

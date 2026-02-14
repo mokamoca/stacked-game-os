@@ -111,6 +111,41 @@ a:hover {
   background: #fff;
 }
 
+.checkGroup {
+  margin: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+  min-width: 220px;
+}
+
+.checkGroup legend {
+  padding: 0 0.3rem;
+  color: #334155;
+  font-size: 0.9rem;
+}
+
+.checkList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.75rem;
+}
+
+.checkItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #0f172a;
+  font-size: 0.93rem;
+}
+
+.checkItem input {
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+}
+
 .button {
   display: inline-flex;
   align-items: center;
@@ -190,6 +225,15 @@ h3 {
   margin: 0.25rem 0 0;
   color: #0f172a;
   font-size: 0.93rem;
+}
+
+.gameImage {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-bottom: 0.6rem;
+  border: 1px solid #dbe3ee;
 }
 
 @media (max-width: 640px) {

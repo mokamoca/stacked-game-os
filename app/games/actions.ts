@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { parseTags } from "@/lib/tags";
+import { parseList, parseTags } from "@/lib/tags";
 
 function getString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -24,11 +24,11 @@ async function getUserOrRedirect() {
 
 export async function createGameAction(formData: FormData) {
   const title = getString(formData, "title");
-  const platform = getString(formData, "platform");
-  const tags = parseTags(getString(formData, "tags"));
+  const platform = parseList(getString(formData, "platform")).join(", ");
+  const genreTags = parseTags(getString(formData, "genre_tags"));
 
   if (!title || !platform) {
-    redirect("/games/new?error=Title+and+platform+are+required");
+    redirect(`/games/new?error=${encodeURIComponent("タイトルとプラットフォームは必須です")}`);
   }
 
   const { supabase, user } = await getUserOrRedirect();
@@ -37,31 +37,31 @@ export async function createGameAction(formData: FormData) {
     user_id: user.id,
     title,
     platform,
-    tags
+    genre_tags: genreTags
   });
 
   if (error) {
     redirect(`/games/new?error=${encodeURIComponent(error.message)}`);
   }
 
-  redirect("/games?message=Game+created");
+  redirect(`/games?message=${encodeURIComponent("ゲームを追加しました")}`);
 }
 
 export async function updateGameAction(formData: FormData) {
   const id = getString(formData, "id");
   const title = getString(formData, "title");
-  const platform = getString(formData, "platform");
-  const tags = parseTags(getString(formData, "tags"));
+  const platform = parseList(getString(formData, "platform")).join(", ");
+  const genreTags = parseTags(getString(formData, "genre_tags"));
 
   if (!id || !title || !platform) {
-    redirect("/games?error=Invalid+input");
+    redirect(`/games?error=${encodeURIComponent("入力が不正です")}`);
   }
 
   const { supabase, user } = await getUserOrRedirect();
 
   const { error } = await supabase
     .from("games")
-    .update({ title, platform, tags })
+    .update({ title, platform, genre_tags: genreTags })
     .eq("id", id)
     .eq("user_id", user.id);
 
@@ -69,14 +69,14 @@ export async function updateGameAction(formData: FormData) {
     redirect(`/games/${id}/edit?error=${encodeURIComponent(error.message)}`);
   }
 
-  redirect("/games?message=Game+updated");
+  redirect(`/games?message=${encodeURIComponent("ゲームを更新しました")}`);
 }
 
 export async function deleteGameAction(formData: FormData) {
   const id = getString(formData, "id");
 
   if (!id) {
-    redirect("/games?error=Missing+game+id");
+    redirect(`/games?error=${encodeURIComponent("ゲームIDが不足しています")}`);
   }
 
   const { supabase, user } = await getUserOrRedirect();
@@ -87,5 +87,5 @@ export async function deleteGameAction(formData: FormData) {
     redirect(`/games?error=${encodeURIComponent(error.message)}`);
   }
 
-  redirect("/games?message=Game+deleted");
+  redirect(`/games?message=${encodeURIComponent("ゲームを削除しました")}`);
 }

@@ -10,30 +10,31 @@ type Props = {
 export default function NewGamePage({ searchParams }: Props) {
   return (
     <section className="card narrow">
-      <h1>Add game</h1>
+      <h1>ゲームを追加</h1>
+      <p className="muted">おすすめ機能の利用にゲーム登録は不要です。ここは任意のマイゲーム管理用です。</p>
       {searchParams.error ? <p className="notice error">{searchParams.error}</p> : null}
       <form action={createGameAction} className="stack">
         <label className="field">
-          <span>Title</span>
+          <span>タイトル</span>
           <input name="title" required />
         </label>
 
         <label className="field">
-          <span>Platform</span>
-          <input name="platform" required placeholder="Steam / PS5 / Switch ..." />
+          <span>プラットフォーム（カンマ区切りで複数可）</span>
+          <input name="platform" required placeholder="PC, PlayStation, Switch" />
         </label>
 
         <label className="field">
-          <span>Mood tags</span>
-          <input name="tags" placeholder="chill, story, brain-off" />
+          <span>ジャンルタグ</span>
+          <input name="genre_tags" placeholder="rpg, act, adv" />
         </label>
 
         <div className="row">
           <button type="submit" className="button primary">
-            Save
+            保存
           </button>
           <Link href="/games" className="button">
-            Cancel
+            キャンセル
           </Link>
         </div>
       </form>
