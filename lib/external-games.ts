@@ -30,6 +30,8 @@ type FetchResult = {
 const RAWG_ENDPOINT = "https://api.rawg.io/api/games";
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_RESULTS = 24;
+const SHOWN_COOLDOWN_HOURS = 48;
+const SHOWN_COOLDOWN_MS = SHOWN_COOLDOWN_HOURS * 60 * 60 * 1000;
 
 const RAWG_PLATFORM_MAP: Record<string, number> = {
   pc: 4,
@@ -227,15 +229,8 @@ export async function fetchExternalGames(params: FetchParams): Promise<FetchResu
   }
 }
 
-export function rankExternalGames(params: {
-  games: ExternalGame[];
-  interactions: Interaction[];
-  moodTags: string[];
-  limit: number;
-}): ExternalGame[] {
-  const { games, interactions, limit } = params;
+function collectHistory(interactions: Interaction[]): Map<string, Interaction[]> {
   const byKey = new Map<string, Interaction[]>();
-
   for (const interaction of interactions) {
     if (!interaction.external_source || !interaction.external_game_id) continue;
     const key = externalKey(interaction.external_source, interaction.external_game_id);
@@ -243,28 +238,71 @@ export function rankExternalGames(params: {
     current.push(interaction);
     byKey.set(key, current);
   }
+  return byKey;
+}
+
+function latestShownAt(history: Interaction[]): number | null {
+  const shown = history
+    .filter((item) => item.action === "shown")
+    .map((item) => new Date(item.created_at).getTime())
+    .filter((value) => !Number.isNaN(value));
+  if (shown.length === 0) return null;
+  return Math.max(...shown);
+}
+
+function scoreGame(params: {
+  game: ExternalGame;
+  history: Interaction[];
+  personalized: boolean;
+}): { score: number; excluded: boolean } {
+  const { game, history, personalized } = params;
+
+  if (history.some((item) => item.action === "dont_recommend")) {
+    return { score: 0, excluded: true };
+  }
+
+  const likeCount = history.filter((item) => item.action === "like").length;
+  const playedCount = history.filter((item) => item.action === "played").length;
+  const notNowCount = history.filter((item) => item.action === "not_now").length;
+  const shownCount = history.filter((item) => item.action === "shown").length;
+
+  let score = game.score_hint;
+  score += likeCount * (personalized ? 14 : 9);
+  score += playedCount * (personalized ? 7 : 3);
+  score -= notNowCount * (personalized ? 8 : 5);
+  score -= shownCount * (personalized ? 0.25 : 1.2);
+
+  const lastShownAt = latestShownAt(history);
+  if (lastShownAt) {
+    const elapsed = Date.now() - lastShownAt;
+    if (elapsed < SHOWN_COOLDOWN_MS) {
+      const hasPositive = likeCount > 0 || playedCount > 0;
+      if (!hasPositive) {
+        return { score: 0, excluded: true };
+      }
+      score -= personalized ? 6 : 10;
+    }
+  }
+
+  return { score, excluded: false };
+}
+
+function rank(params: {
+  games: ExternalGame[];
+  interactions: Interaction[];
+  limit: number;
+  personalized: boolean;
+}): ExternalGame[] {
+  const { games, interactions, limit, personalized } = params;
+  const byKey = collectHistory(interactions);
 
   const scored = games
     .map((game) => {
       const key = externalKey(game.external_source, game.external_game_id);
       const history = byKey.get(key) ?? [];
-
-      if (history.some((item) => item.action === "dont_recommend")) {
-        return null;
-      }
-
-      let score = game.score_hint;
-      const likeCount = history.filter((item) => item.action === "like").length;
-      const playedCount = history.filter((item) => item.action === "played").length;
-      const shownCount = history.filter((item) => item.action === "shown").length;
-      const notNowCount = history.filter((item) => item.action === "not_now").length;
-
-      score += likeCount * 9;
-      score += playedCount * 2;
-      score -= notNowCount * 5;
-      score -= shownCount * 0.8;
-
-      return { game, score };
+      const result = scoreGame({ game, history, personalized });
+      if (result.excluded) return null;
+      return { game, score: result.score };
     })
     .filter((item): item is { game: ExternalGame; score: number } => item !== null);
 
@@ -272,46 +310,33 @@ export function rankExternalGames(params: {
   return scored.slice(0, Math.max(0, limit)).map((item) => item.game);
 }
 
+export function rankExternalGames(params: {
+  games: ExternalGame[];
+  interactions: Interaction[];
+  moodTags: string[];
+  limit: number;
+}): ExternalGame[] {
+  return rank({
+    games: params.games,
+    interactions: params.interactions,
+    limit: params.limit,
+    personalized: false
+  });
+}
+
 export function rankPersonalizedExternalGames(params: {
   games: ExternalGame[];
   interactions: Interaction[];
   limit: number;
 }): ExternalGame[] {
-  const { games, interactions, limit } = params;
-  const byKey = new Map<string, Interaction[]>();
+  return rank({
+    games: params.games,
+    interactions: params.interactions,
+    limit: params.limit,
+    personalized: true
+  });
+}
 
-  for (const interaction of interactions) {
-    if (!interaction.external_source || !interaction.external_game_id) continue;
-    const key = externalKey(interaction.external_source, interaction.external_game_id);
-    const current = byKey.get(key) ?? [];
-    current.push(interaction);
-    byKey.set(key, current);
-  }
-
-  const scored = games
-    .map((game) => {
-      const key = externalKey(game.external_source, game.external_game_id);
-      const history = byKey.get(key) ?? [];
-
-      if (history.some((item) => item.action === "dont_recommend")) {
-        return null;
-      }
-
-      let score = game.score_hint;
-      const likeCount = history.filter((item) => item.action === "like").length;
-      const playedCount = history.filter((item) => item.action === "played").length;
-      const notNowCount = history.filter((item) => item.action === "not_now").length;
-      const shownCount = history.filter((item) => item.action === "shown").length;
-
-      score += likeCount * 14;
-      score += playedCount * 8;
-      score -= notNowCount * 8;
-      score -= shownCount * 0.2;
-
-      return { game, score };
-    })
-    .filter((item): item is { game: ExternalGame; score: number } => item !== null);
-
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, Math.max(0, limit)).map((item) => item.game);
+export function getShownCooldownHours(): number {
+  return SHOWN_COOLDOWN_HOURS;
 }

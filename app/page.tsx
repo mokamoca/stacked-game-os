@@ -7,6 +7,7 @@ import {
   rankPersonalizedExternalGames,
   type ExternalGame
 } from "@/lib/external-games";
+import { rerankWithAI } from "@/lib/ai-rerank";
 import type { Interaction } from "@/lib/types";
 
 type SearchValue = string | string[] | undefined;
@@ -78,6 +79,46 @@ function displayTitle(game: ExternalGame): string {
   return game.title_ja || game.title;
 }
 
+function gameKey(game: ExternalGame): string {
+  return `${game.external_source}:${game.external_game_id}`;
+}
+
+function applyAiOrder(candidates: ExternalGame[], rankedIds: string[]): ExternalGame[] {
+  const map = new Map(candidates.map((item) => [gameKey(item), item]));
+  const ordered: ExternalGame[] = [];
+
+  for (const id of rankedIds) {
+    const item = map.get(id);
+    if (!item) continue;
+    ordered.push(item);
+    map.delete(id);
+  }
+
+  for (const rest of candidates) {
+    if (map.has(gameKey(rest))) ordered.push(rest);
+  }
+
+  return ordered;
+}
+
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function computeMetrics(interactions: Interaction[]) {
+  const shown = interactions.filter((item) => item.action === "shown").length;
+  const like = interactions.filter((item) => item.action === "like").length;
+  const played = interactions.filter((item) => item.action === "played").length;
+  const dontRecommend = interactions.filter((item) => item.action === "dont_recommend").length;
+
+  return {
+    shown,
+    likeRate: shown > 0 ? like / shown : 0,
+    playedRate: shown > 0 ? played / shown : 0,
+    dontRecommendRate: shown > 0 ? dontRecommend / shown : 0
+  };
+}
+
 async function recordShownInteractions(params: {
   userId: string;
   recommendations: ExternalGame[];
@@ -101,19 +142,27 @@ async function recordShownInteractions(params: {
   await supabase.from("interactions").insert(toInsert);
 }
 
-function GameCard(params: { game: ExternalGame; mood: string; returnTo: string }) {
-  const { game, mood, returnTo } = params;
+function GameCard(params: {
+  game: ExternalGame;
+  mood: string;
+  returnTo: string;
+  aiReason?: string;
+}) {
+  const { game, mood, returnTo, aiReason } = params;
   return (
-    <article key={`${game.external_source}-${game.external_game_id}`} className="card">
+    <article key={gameKey(game)} className="gameCard">
       {game.image_url ? (
         <Image src={game.image_url} alt={displayTitle(game)} width={640} height={360} className="gameImage" />
       ) : null}
-      <h3>{displayTitle(game)}</h3>
-      <p className="muted">{game.platform}</p>
-      <p className="chipLine">ジャンル: {game.genre_tags.length > 0 ? game.genre_tags.join(", ") : "なし"}</p>
-      <p className="chipLine">評価: {game.rating > 0 ? `${game.rating.toFixed(1)} / 5` : "不明"}</p>
-      <p className="chipLine">メタスコア: {game.metacritic > 0 ? String(game.metacritic) : "不明"}</p>
-      <p className="chipLine">発売日: {formatReleaseDate(game.released)}</p>
+      <div className="gameBody">
+        <h3>{displayTitle(game)}</h3>
+        <p className="metaLine">{game.platform}</p>
+        <p className="chipLine">ジャンル: {game.genre_tags.length > 0 ? game.genre_tags.join(", ") : "なし"}</p>
+        <p className="chipLine">評価: {game.rating > 0 ? `${game.rating.toFixed(1)} / 5` : "不明"}</p>
+        <p className="chipLine">メタスコア: {game.metacritic > 0 ? String(game.metacritic) : "不明"}</p>
+        <p className="chipLine">発売日: {formatReleaseDate(game.released)}</p>
+        {aiReason ? <p className="aiReason">AI理由: {aiReason}</p> : null}
+      </div>
 
       <div className="actionsGrid">
         {[
@@ -175,29 +224,58 @@ export default async function DashboardPage({ searchParams }: Props) {
     genres: selectedGenres
   });
 
-  const recommendations = rankExternalGames({
+  const personalizedBase = rankPersonalizedExternalGames({
+    games: externalResult.games,
+    interactions,
+    limit: 15
+  });
+  const fallbackBase = rankExternalGames({
     games: externalResult.games,
     interactions,
     moodTags: selectedMoodPresets,
-    limit: 3
+    limit: 15
   });
 
-  const personalizedRecommendations = rankPersonalizedExternalGames({
-    games: externalResult.games,
-    interactions,
-    limit: 3
+  const aiPersonalized = await rerankWithAI({
+    candidates: personalizedBase.map((game) => ({
+      id: gameKey(game),
+      title: displayTitle(game),
+      platform: game.platform,
+      genres: game.genre_tags,
+      rating: game.rating,
+      released: game.released
+    })),
+    moodPresets: selectedMoodPresets,
+    platformFilters: selectedPlatforms,
+    genreFilters: selectedGenres,
+    interactions
   });
 
-  const personalizedIds = new Set(
-    personalizedRecommendations.map((item) => `${item.external_source}:${item.external_game_id}`)
-  );
-  const fallbackRecommendations = recommendations.filter(
-    (item) => !personalizedIds.has(`${item.external_source}:${item.external_game_id}`)
-  );
+  const aiFallback = await rerankWithAI({
+    candidates: fallbackBase.map((game) => ({
+      id: gameKey(game),
+      title: displayTitle(game),
+      platform: game.platform,
+      genres: game.genre_tags,
+      rating: game.rating,
+      released: game.released
+    })),
+    moodPresets: selectedMoodPresets,
+    platformFilters: selectedPlatforms,
+    genreFilters: selectedGenres,
+    interactions
+  });
+
+  const personalizedRecommendations = applyAiOrder(personalizedBase, aiPersonalized.rankedIds).slice(0, 3);
+
+  const personalizedIds = new Set(personalizedRecommendations.map((item) => gameKey(item)));
+  const fallbackRecommendations = applyAiOrder(fallbackBase, aiFallback.rankedIds)
+    .filter((item) => !personalizedIds.has(gameKey(item)))
+    .slice(0, 3);
 
   await recordShownInteractions({
     userId: user.id,
-    recommendations: [...personalizedRecommendations, ...fallbackRecommendations].slice(0, 3),
+    recommendations: [...personalizedRecommendations, ...fallbackRecommendations],
     moodTags: mood
   });
 
@@ -207,18 +285,22 @@ export default async function DashboardPage({ searchParams }: Props) {
   for (const genre of selectedGenres) returnParams.append("genre", genre);
   const returnTo = returnParams.toString() ? `/?${returnParams.toString()}` : "/";
 
+  const metrics = computeMetrics(interactions);
+  const aiWarning = aiPersonalized.error || aiFallback.error;
+
   return (
     <div className="stack">
-      <section className="card">
-        <h1>今日の1本を決める</h1>
-        <p className="muted">外部ゲームDBのデータを使って、プラットフォーム・ジャンル中心でおすすめを最大3本表示します。</p>
-        <p className="notice ok">気分プリセットは現在ベータ機能です。現時点では推薦への影響を最小化しています。</p>
-        <p className="muted">日本語タイトルを優先表示します。未取得の場合は英語タイトルを表示します。</p>
+      <section className="hero card">
+        <div>
+          <h1>今日の1本を決める</h1>
+          <p className="muted">今の気分と行動履歴から、今日の候補を提案します。</p>
+        </div>
 
         {message ? <p className="notice ok">{message}</p> : null}
         {error ? <p className="notice error">{error}</p> : null}
         {interactionsError ? <p className="notice error">{interactionsError.message}</p> : null}
         {externalResult.error ? <p className="notice error">{externalResult.error}</p> : null}
+        {aiWarning ? <p className="notice error">{aiWarning}</p> : null}
 
         <form method="GET" className="rowWrap">
           <fieldset className="checkGroup grow">
@@ -239,7 +321,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           </fieldset>
 
           <fieldset className="checkGroup">
-            <legend>プラットフォーム（複数選択）</legend>
+            <legend>プラットフォーム</legend>
             <div className="checkList">
               {PLATFORM_OPTIONS.map((item) => (
                 <label key={item.key} className="checkItem">
@@ -256,7 +338,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           </fieldset>
 
           <fieldset className="checkGroup">
-            <legend>ジャンル（複数選択）</legend>
+            <legend>ジャンル</legend>
             <div className="checkList">
               {GENRE_OPTIONS.map((item) => (
                 <label key={item.key} className="checkItem">
@@ -276,9 +358,13 @@ export default async function DashboardPage({ searchParams }: Props) {
       <section>
         <h2>あなたへのおすすめ（行動ベース）</h2>
         {personalizedRecommendations.length === 0 ? (
-          <p className="muted">行動履歴が増えると、ここにより個人化されたおすすめを表示します。</p>
+          <p className="muted">行動履歴が増えると、ここに個人化された候補が表示されます。</p>
         ) : (
-          <div className="grid">{personalizedRecommendations.map((game) => GameCard({ game, mood, returnTo }))}</div>
+          <div className="grid">
+            {personalizedRecommendations.map((game) =>
+              GameCard({ game, mood, returnTo, aiReason: aiPersonalized.reasons[gameKey(game)] })
+            )}
+          </div>
         )}
       </section>
 
@@ -287,8 +373,34 @@ export default async function DashboardPage({ searchParams }: Props) {
         {fallbackRecommendations.length === 0 ? (
           <p className="muted">候補が見つかりませんでした。フィルタ条件を緩めて再実行してください。</p>
         ) : (
-          <div className="grid">{fallbackRecommendations.map((game) => GameCard({ game, mood, returnTo }))}</div>
+          <div className="grid">
+            {fallbackRecommendations.map((game) =>
+              GameCard({ game, mood, returnTo, aiReason: aiFallback.reasons[gameKey(game)] })
+            )}
+          </div>
         )}
+      </section>
+
+      <section className="card">
+        <h2>推薦指標（全期間）</h2>
+        <div className="metricGrid">
+          <article className="metricCard">
+            <span className="metricLabel">表示数（shown）</span>
+            <strong>{metrics.shown}</strong>
+          </article>
+          <article className="metricCard">
+            <span className="metricLabel">like率</span>
+            <strong>{formatPercent(metrics.likeRate)}</strong>
+          </article>
+          <article className="metricCard">
+            <span className="metricLabel">played率</span>
+            <strong>{formatPercent(metrics.playedRate)}</strong>
+          </article>
+          <article className="metricCard">
+            <span className="metricLabel">dont_recommend率</span>
+            <strong>{formatPercent(metrics.dontRecommendRate)}</strong>
+          </article>
+        </div>
       </section>
     </div>
   );

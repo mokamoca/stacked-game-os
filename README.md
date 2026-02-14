@@ -21,9 +21,11 @@ npm run dev
 NEXT_PUBLIC_SUPABASE_URL=YOUR_SUPABASE_PROJECT_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
 RAWG_API_KEY=YOUR_RAWG_API_KEY
+OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 ```
 
 `RAWG_API_KEY` はサーバー側のみで利用します（`NEXT_PUBLIC_` は付けないでください）。
+`OPENAI_API_KEY` もサーバー側のみで利用します（未設定時はAI再ランキングをスキップ）。
 
 ## 3. Supabase セットアップ
 
@@ -46,7 +48,10 @@ RAWG_API_KEY=YOUR_RAWG_API_KEY
 - 認証: `/login`, `/signup`, `/logout` (Email/Password)
 - 保護ルート: `/`, `/games*` は未ログイン時 `/login` へリダイレクト
 - ゲーム管理: `/games`, `/games/new`, `/games/[id]/edit`（旧機能・利用非推奨）
-- ダッシュボード: RAWG候補をプラットフォーム + ジャンル中心で推薦最大3件
+- ダッシュボード: RAWG候補をプラットフォーム + ジャンル中心で取得し、AI再ランキングで最大3件表示
+- ダッシュボード上部に「あなたへのおすすめ（行動ベース）」を表示
+- 48時間の shown クールダウンで同一タイトルの連続表示を抑制
+- 推薦品質指標（shown数 / like率 / played率 / dont_recommend率）を表示
 - マイページ: `/mypage` で `like / played / not_now / dont_recommend / shown` を確認・編集
 - ワンアクション: `like`, `played`, `not_now`, `dont_recommend` を保存
 - 推薦表示時に `shown` を自動記録
@@ -60,6 +65,7 @@ RAWG_API_KEY=YOUR_RAWG_API_KEY
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
    - `RAWG_API_KEY`
+   - `OPENAI_API_KEY`
 5. Deploy
 6. Supabase Authentication > URL Configuration の Site URL を Vercel 本番URLに更新
 
@@ -79,6 +85,7 @@ RAWG_API_KEY=YOUR_RAWG_API_KEY
   - レート制限があるため、アプリ側で短時間メモリキャッシュを使用
   - API障害時は候補を空表示し、エラーメッセージを出す
   - 日本語タイトルはRAWG側で常に提供されるわけではないため、取得できない場合は英語タイトルを表示
+  - AI再ランキングはOpenAI API依存のため、キー未設定やAPI障害時は既存スコアリングにフォールバック
 
 ## TODO
 

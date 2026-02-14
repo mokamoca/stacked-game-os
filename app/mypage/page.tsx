@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+﻿import { createClient } from "@/lib/supabase/server";
 import { deleteInteractionAction, updateInteractionAction } from "@/app/mypage/actions";
 import type { Interaction, InteractionAction } from "@/lib/types";
 
@@ -75,7 +75,7 @@ export default async function MyPage({ searchParams }: Props) {
   return (
     <section className="stack">
       <h1>マイページ</h1>
-      <p className="muted">自分で選んだ結果を管理できます。初期表示では「表示済み」は除外しています。</p>
+      <p className="muted">自分で選んだ結果を管理できます。初期表示では「表示済み」を除外しています。</p>
 
       {searchParams.message ? <p className="notice ok">{searchParams.message}</p> : null}
       {searchParams.error ? <p className="notice error">{searchParams.error}</p> : null}
