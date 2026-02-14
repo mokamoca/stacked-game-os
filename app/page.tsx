@@ -1,7 +1,12 @@
 ﻿import Image from "next/image";
 import { createClient } from "@/lib/supabase/server";
 import { interactionAction } from "@/app/dashboard-actions";
-import { fetchExternalGames, rankExternalGames, type ExternalGame } from "@/lib/external-games";
+import {
+  fetchExternalGames,
+  rankExternalGames,
+  rankPersonalizedExternalGames,
+  type ExternalGame
+} from "@/lib/external-games";
 import type { Interaction } from "@/lib/types";
 
 type SearchValue = string | string[] | undefined;
@@ -69,6 +74,10 @@ function formatReleaseDate(raw: string): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function displayTitle(game: ExternalGame): string {
+  return game.title_ja || game.title;
+}
+
 async function recordShownInteractions(params: {
   userId: string;
   recommendations: ExternalGame[];
@@ -83,13 +92,51 @@ async function recordShownInteractions(params: {
     game_id: null,
     external_source: game.external_source,
     external_game_id: game.external_game_id,
-    game_title_snapshot: game.title,
+    game_title_snapshot: displayTitle(game),
     action: "shown",
     time_bucket: 30,
     context_tags: moodTags
   }));
 
   await supabase.from("interactions").insert(toInsert);
+}
+
+function GameCard(params: { game: ExternalGame; mood: string; returnTo: string }) {
+  const { game, mood, returnTo } = params;
+  return (
+    <article key={`${game.external_source}-${game.external_game_id}`} className="card">
+      {game.image_url ? (
+        <Image src={game.image_url} alt={displayTitle(game)} width={640} height={360} className="gameImage" />
+      ) : null}
+      <h3>{displayTitle(game)}</h3>
+      <p className="muted">{game.platform}</p>
+      <p className="chipLine">ジャンル: {game.genre_tags.length > 0 ? game.genre_tags.join(", ") : "なし"}</p>
+      <p className="chipLine">評価: {game.rating > 0 ? `${game.rating.toFixed(1)} / 5` : "不明"}</p>
+      <p className="chipLine">メタスコア: {game.metacritic > 0 ? String(game.metacritic) : "不明"}</p>
+      <p className="chipLine">発売日: {formatReleaseDate(game.released)}</p>
+
+      <div className="actionsGrid">
+        {[
+          { action: "like", label: "好き" },
+          { action: "played", label: "遊んだ" },
+          { action: "not_now", label: "今はやめる" },
+          { action: "dont_recommend", label: "今後おすすめしない" }
+        ].map((entry) => (
+          <form key={entry.action} action={interactionAction}>
+            <input type="hidden" name="action" value={entry.action} />
+            <input type="hidden" name="external_source" value={game.external_source} />
+            <input type="hidden" name="external_game_id" value={game.external_game_id} />
+            <input type="hidden" name="game_title_snapshot" value={displayTitle(game)} />
+            <input type="hidden" name="context_tags" value={mood} />
+            <input type="hidden" name="return_to" value={returnTo} />
+            <button type="submit" className="button">
+              {entry.label}
+            </button>
+          </form>
+        ))}
+      </div>
+    </article>
+  );
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
@@ -135,9 +182,22 @@ export default async function DashboardPage({ searchParams }: Props) {
     limit: 3
   });
 
+  const personalizedRecommendations = rankPersonalizedExternalGames({
+    games: externalResult.games,
+    interactions,
+    limit: 3
+  });
+
+  const personalizedIds = new Set(
+    personalizedRecommendations.map((item) => `${item.external_source}:${item.external_game_id}`)
+  );
+  const fallbackRecommendations = recommendations.filter(
+    (item) => !personalizedIds.has(`${item.external_source}:${item.external_game_id}`)
+  );
+
   await recordShownInteractions({
     userId: user.id,
-    recommendations,
+    recommendations: [...personalizedRecommendations, ...fallbackRecommendations].slice(0, 3),
     moodTags: mood
   });
 
@@ -153,6 +213,7 @@ export default async function DashboardPage({ searchParams }: Props) {
         <h1>今日の1本を決める</h1>
         <p className="muted">外部ゲームDBのデータを使って、プラットフォーム・ジャンル中心でおすすめを最大3本表示します。</p>
         <p className="notice ok">気分プリセットは現在ベータ機能です。現時点では推薦への影響を最小化しています。</p>
+        <p className="muted">日本語タイトルを優先表示します。未取得の場合は英語タイトルを表示します。</p>
 
         {message ? <p className="notice ok">{message}</p> : null}
         {error ? <p className="notice error">{error}</p> : null}
@@ -213,46 +274,20 @@ export default async function DashboardPage({ searchParams }: Props) {
       </section>
 
       <section>
+        <h2>あなたへのおすすめ（行動ベース）</h2>
+        {personalizedRecommendations.length === 0 ? (
+          <p className="muted">行動履歴が増えると、ここにより個人化されたおすすめを表示します。</p>
+        ) : (
+          <div className="grid">{personalizedRecommendations.map((game) => GameCard({ game, mood, returnTo }))}</div>
+        )}
+      </section>
+
+      <section>
         <h2>今日のおすすめ</h2>
-        {recommendations.length === 0 ? (
+        {fallbackRecommendations.length === 0 ? (
           <p className="muted">候補が見つかりませんでした。フィルタ条件を緩めて再実行してください。</p>
         ) : (
-          <div className="grid">
-            {recommendations.map((game) => (
-              <article key={`${game.external_source}-${game.external_game_id}`} className="card">
-                {game.image_url ? (
-                  <Image src={game.image_url} alt={game.title} width={640} height={360} className="gameImage" />
-                ) : null}
-                <h3>{game.title}</h3>
-                <p className="muted">{game.platform}</p>
-                <p className="chipLine">ジャンル: {game.genre_tags.length > 0 ? game.genre_tags.join(", ") : "なし"}</p>
-                <p className="chipLine">評価: {game.rating > 0 ? `${game.rating.toFixed(1)} / 5` : "不明"}</p>
-                <p className="chipLine">メタスコア: {game.metacritic > 0 ? String(game.metacritic) : "不明"}</p>
-                <p className="chipLine">発売日: {formatReleaseDate(game.released)}</p>
-
-                <div className="actionsGrid">
-                  {[
-                    { action: "like", label: "好き" },
-                    { action: "played", label: "遊んだ" },
-                    { action: "not_now", label: "今はやめる" },
-                    { action: "dont_recommend", label: "今後おすすめしない" }
-                  ].map((entry) => (
-                    <form key={entry.action} action={interactionAction}>
-                      <input type="hidden" name="action" value={entry.action} />
-                      <input type="hidden" name="external_source" value={game.external_source} />
-                      <input type="hidden" name="external_game_id" value={game.external_game_id} />
-                      <input type="hidden" name="game_title_snapshot" value={game.title} />
-                      <input type="hidden" name="context_tags" value={mood} />
-                      <input type="hidden" name="return_to" value={returnTo} />
-                      <button type="submit" className="button">
-                        {entry.label}
-                      </button>
-                    </form>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
+          <div className="grid">{fallbackRecommendations.map((game) => GameCard({ game, mood, returnTo }))}</div>
         )}
       </section>
     </div>

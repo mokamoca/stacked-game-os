@@ -6,6 +6,7 @@ export type ExternalGame = {
   external_source: ExternalSource;
   external_game_id: string;
   title: string;
+  title_ja: string;
   platform: string;
   genre_tags: string[];
   image_url: string;
@@ -57,6 +58,7 @@ const localCache = new Map<string, CacheItem>();
 type RawgGame = {
   id: number;
   name: string;
+  name_original?: string | null;
   background_image?: string | null;
   rating?: number | null;
   ratings_count?: number | null;
@@ -107,6 +109,10 @@ function externalKey(source: string, id: string): string {
   return `${source}:${id}`;
 }
 
+function hasJapanese(text: string): boolean {
+  return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]/.test(text);
+}
+
 function toRawgPlatformParam(platforms: string[]): string {
   const ids = normalizeQuery(platforms)
     .map((key) => RAWG_PLATFORM_MAP[key])
@@ -144,6 +150,9 @@ function mapRawgGame(game: RawgGame): ExternalGame {
   const ratingCount = typeof game.ratings_count === "number" ? game.ratings_count : 0;
   const metacritic = typeof game.metacritic === "number" ? game.metacritic : 0;
   const released = typeof game.released === "string" ? game.released : "";
+  const name = game.name?.trim() || "";
+  const nameOriginal = game.name_original?.trim() || "";
+  const titleJa = hasJapanese(name) ? name : hasJapanese(nameOriginal) ? nameOriginal : "";
 
   const scoreHint =
     rating * 8 +
@@ -154,7 +163,8 @@ function mapRawgGame(game: RawgGame): ExternalGame {
   return {
     external_source: "rawg",
     external_game_id: String(game.id),
-    title: game.name?.trim() || "タイトル不明",
+    title: name || "タイトル不明",
+    title_ja: titleJa,
     platform: platformNames.length > 0 ? platformNames.join(", ") : "不明",
     genre_tags: Array.from(new Set(genreNames)),
     image_url: game.background_image ?? "",
@@ -179,7 +189,8 @@ export async function fetchExternalGames(params: FetchParams): Promise<FetchResu
   const qs = new URLSearchParams({
     key: apiKey,
     page_size: String(MAX_RESULTS),
-    ordering: "-rating"
+    ordering: "-rating",
+    lang: "ja"
   });
 
   const platformParam = toRawgPlatformParam(params.platforms);
@@ -192,7 +203,8 @@ export async function fetchExternalGames(params: FetchParams): Promise<FetchResu
     const response = await fetch(`${RAWG_ENDPOINT}?${qs.toString()}`, {
       method: "GET",
       headers: {
-        Accept: "application/json"
+        Accept: "application/json",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
       },
       next: { revalidate: 300 }
     });
@@ -251,6 +263,50 @@ export function rankExternalGames(params: {
       score += playedCount * 2;
       score -= notNowCount * 5;
       score -= shownCount * 0.8;
+
+      return { game, score };
+    })
+    .filter((item): item is { game: ExternalGame; score: number } => item !== null);
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, Math.max(0, limit)).map((item) => item.game);
+}
+
+export function rankPersonalizedExternalGames(params: {
+  games: ExternalGame[];
+  interactions: Interaction[];
+  limit: number;
+}): ExternalGame[] {
+  const { games, interactions, limit } = params;
+  const byKey = new Map<string, Interaction[]>();
+
+  for (const interaction of interactions) {
+    if (!interaction.external_source || !interaction.external_game_id) continue;
+    const key = externalKey(interaction.external_source, interaction.external_game_id);
+    const current = byKey.get(key) ?? [];
+    current.push(interaction);
+    byKey.set(key, current);
+  }
+
+  const scored = games
+    .map((game) => {
+      const key = externalKey(game.external_source, game.external_game_id);
+      const history = byKey.get(key) ?? [];
+
+      if (history.some((item) => item.action === "dont_recommend")) {
+        return null;
+      }
+
+      let score = game.score_hint;
+      const likeCount = history.filter((item) => item.action === "like").length;
+      const playedCount = history.filter((item) => item.action === "played").length;
+      const notNowCount = history.filter((item) => item.action === "not_now").length;
+      const shownCount = history.filter((item) => item.action === "shown").length;
+
+      score += likeCount * 14;
+      score += playedCount * 8;
+      score -= notNowCount * 8;
+      score -= shownCount * 0.2;
 
       return { game, score };
     })

@@ -47,7 +47,7 @@ RAWG_API_KEY=YOUR_RAWG_API_KEY
 - 保護ルート: `/`, `/games*` は未ログイン時 `/login` へリダイレクト
 - ゲーム管理: `/games`, `/games/new`, `/games/[id]/edit`（旧機能・利用非推奨）
 - ダッシュボード: RAWG候補をプラットフォーム + ジャンル中心で推薦最大3件
-- 履歴: `/history` で `like / played / not_now / dont_recommend / shown` を確認
+- マイページ: `/mypage` で `like / played / not_now / dont_recommend / shown` を確認・編集
 - ワンアクション: `like`, `played`, `not_now`, `dont_recommend` を保存
 - 推薦表示時に `shown` を自動記録
 
@@ -78,6 +78,7 @@ RAWG_API_KEY=YOUR_RAWG_API_KEY
   - APIキー取得が必要
   - レート制限があるため、アプリ側で短時間メモリキャッシュを使用
   - API障害時は候補を空表示し、エラーメッセージを出す
+  - 日本語タイトルはRAWG側で常に提供されるわけではないため、取得できない場合は英語タイトルを表示
 
 ## TODO
 
