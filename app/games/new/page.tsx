@@ -11,7 +11,7 @@ export default function NewGamePage({ searchParams }: Props) {
   return (
     <section className="card narrow">
       <h1>ゲームを追加</h1>
-      <p className="muted">おすすめ機能の利用にゲーム登録は不要です。ここは任意のマイゲーム管理用です。</p>
+      <p className="muted">旧マイゲーム管理機能です。おすすめ利用には不要で、将来は廃止予定です。</p>
       {searchParams.error ? <p className="notice error">{searchParams.error}</p> : null}
       <form action={createGameAction} className="stack">
         <label className="field">

@@ -36,7 +36,7 @@ export default async function GamesPage({ searchParams }: Props) {
           追加
         </Link>
       </div>
-      <p className="muted">この画面は任意のマイゲーム管理用です。おすすめ表示はダッシュボードで外部DBから取得します。</p>
+      <p className="muted">この画面は旧マイゲーム管理機能です。現在の推奨フローは「おすすめ」+「履歴」です。</p>
 
       {searchParams.message ? <p className="notice ok">{searchParams.message}</p> : null}
       {searchParams.error ? <p className="notice error">{searchParams.error}</p> : null}

@@ -30,8 +30,8 @@ export default async function RootLayout({
               {user ? (
                 <>
                   <Link href="/">おすすめ</Link>
+                  <Link href="/history">履歴</Link>
                   <Link href="/logout">ログアウト</Link>
-                  <Link href="/games">マイゲーム（任意）</Link>
                 </>
               ) : (
                 <>

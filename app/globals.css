@@ -59,6 +59,11 @@ a:hover {
   gap: 1rem;
 }
 
+.stackCompact {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .row,
 .rowWrap {
   display: flex;

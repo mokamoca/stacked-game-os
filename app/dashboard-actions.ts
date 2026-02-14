@@ -11,14 +11,6 @@ const ALLOWED_ACTIONS: InteractionAction[] = [
   "dont_recommend"
 ];
 
-function parseTimeBucket(raw: string): number {
-  const value = Number(raw);
-  if ([15, 30, 60, 120].includes(value)) {
-    return value;
-  }
-  return 30;
-}
-
 function safeReturnTo(raw: string): string {
   if (!raw.startsWith("/")) return "/";
   return raw;
@@ -30,7 +22,6 @@ export async function interactionAction(formData: FormData) {
   const externalSourceRaw = formData.get("external_source");
   const externalGameIdRaw = formData.get("external_game_id");
   const gameTitleSnapshotRaw = formData.get("game_title_snapshot");
-  const timeBucketRaw = formData.get("time_bucket");
   const contextTagsRaw = formData.get("context_tags");
   const returnToRaw = formData.get("return_to");
 
@@ -53,8 +44,6 @@ export async function interactionAction(formData: FormData) {
     }
   }
 
-  const timeBucket =
-    typeof timeBucketRaw === "string" ? parseTimeBucket(timeBucketRaw) : 30;
   const contextTags = typeof contextTagsRaw === "string" ? contextTagsRaw.trim() : "";
   const externalSource = typeof externalSourceRaw === "string" ? externalSourceRaw.trim() : "";
   const externalGameId = typeof externalGameIdRaw === "string" ? externalGameIdRaw.trim() : "";
@@ -77,7 +66,7 @@ export async function interactionAction(formData: FormData) {
     external_game_id: externalGameId,
     game_title_snapshot: gameTitleSnapshot,
     action,
-    time_bucket: timeBucket,
+    time_bucket: 30,
     context_tags: contextTags
   });
 

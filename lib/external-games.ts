@@ -1,5 +1,4 @@
-import { parseTags } from "@/lib/tags";
-import type { Interaction } from "@/lib/types";
+﻿import type { Interaction } from "@/lib/types";
 
 type ExternalSource = "rawg";
 
@@ -11,6 +10,10 @@ export type ExternalGame = {
   genre_tags: string[];
   image_url: string;
   score_hint: number;
+  rating: number;
+  metacritic: number;
+  ratings_count: number;
+  released: string;
 };
 
 type FetchParams = {
@@ -44,14 +47,6 @@ const RAWG_GENRE_MAP: Record<string, string> = {
   indie: "indie"
 };
 
-const moodRelatedGenreKeywords: Record<string, string[]> = {
-  chill: ["puzzle", "casual", "indie"],
-  story: ["adventure", "rpg", "narrative"],
-  "brain-off": ["arcade", "action", "casual"],
-  hard: ["souls", "hard", "difficult", "roguelike"],
-  cozy: ["cozy", "relaxing", "casual", "simulation"]
-};
-
 type CacheItem = {
   expiresAt: number;
   value: FetchResult;
@@ -66,6 +61,7 @@ type RawgGame = {
   rating?: number | null;
   ratings_count?: number | null;
   metacritic?: number | null;
+  released?: string | null;
   genres?: Array<{ name?: string | null }>;
   platforms?: Array<{ platform?: { name?: string | null } }>;
 };
@@ -107,17 +103,6 @@ function putCache(key: string, value: FetchResult) {
   });
 }
 
-function parseCsvContext(raw: string): string[] {
-  return parseTags(raw);
-}
-
-function hasMoodOverlap(currentMoodTags: string[], rawContextTags: string): boolean {
-  if (currentMoodTags.length === 0) return true;
-  const contextTags = parseCsvContext(rawContextTags);
-  if (contextTags.length === 0) return true;
-  return currentMoodTags.some((tag) => contextTags.includes(tag));
-}
-
 function externalKey(source: string, id: string): string {
   return `${source}:${id}`;
 }
@@ -136,6 +121,17 @@ function toRawgGenreParam(genres: string[]): string {
   return Array.from(new Set(slugs)).join(",");
 }
 
+function recencyBoost(released: string): number {
+  if (!released) return 0;
+  const releasedMs = new Date(released).getTime();
+  if (Number.isNaN(releasedMs)) return 0;
+  const days = Math.floor((Date.now() - releasedMs) / (24 * 60 * 60 * 1000));
+  if (days < 0) return 0;
+  if (days <= 365) return 2;
+  if (days <= 365 * 2) return 1;
+  return 0;
+}
+
 function mapRawgGame(game: RawgGame): ExternalGame {
   const platformNames = (game.platforms ?? [])
     .map((item) => item.platform?.name?.trim())
@@ -147,7 +143,13 @@ function mapRawgGame(game: RawgGame): ExternalGame {
   const rating = typeof game.rating === "number" ? game.rating : 0;
   const ratingCount = typeof game.ratings_count === "number" ? game.ratings_count : 0;
   const metacritic = typeof game.metacritic === "number" ? game.metacritic : 0;
-  const scoreHint = rating * 8 + Math.min(12, Math.log10(Math.max(1, ratingCount)) * 4) + metacritic / 20;
+  const released = typeof game.released === "string" ? game.released : "";
+
+  const scoreHint =
+    rating * 8 +
+    Math.min(12, Math.log10(Math.max(1, ratingCount)) * 4) +
+    metacritic / 20 +
+    recencyBoost(released);
 
   return {
     external_source: "rawg",
@@ -156,7 +158,11 @@ function mapRawgGame(game: RawgGame): ExternalGame {
     platform: platformNames.length > 0 ? platformNames.join(", ") : "不明",
     genre_tags: Array.from(new Set(genreNames)),
     image_url: game.background_image ?? "",
-    score_hint: scoreHint
+    score_hint: scoreHint,
+    rating,
+    metacritic,
+    ratings_count: ratingCount,
+    released
   };
 }
 
@@ -172,7 +178,8 @@ export async function fetchExternalGames(params: FetchParams): Promise<FetchResu
 
   const qs = new URLSearchParams({
     key: apiKey,
-    page_size: String(MAX_RESULTS)
+    page_size: String(MAX_RESULTS),
+    ordering: "-rating"
   });
 
   const platformParam = toRawgPlatformParam(params.platforms);
@@ -214,9 +221,8 @@ export function rankExternalGames(params: {
   moodTags: string[];
   limit: number;
 }): ExternalGame[] {
-  const { games, interactions, moodTags, limit } = params;
+  const { games, interactions, limit } = params;
   const byKey = new Map<string, Interaction[]>();
-  const nowMs = Date.now();
 
   for (const interaction of interactions) {
     if (!interaction.external_source || !interaction.external_game_id) continue;
@@ -237,30 +243,14 @@ export function rankExternalGames(params: {
 
       let score = game.score_hint;
       const likeCount = history.filter((item) => item.action === "like").length;
+      const playedCount = history.filter((item) => item.action === "played").length;
       const shownCount = history.filter((item) => item.action === "shown").length;
-      const notNowCount = history.filter(
-        (item) => item.action === "not_now" && hasMoodOverlap(moodTags, item.context_tags)
-      ).length;
-
-      const playedRecently = history.some((item) => {
-        if (item.action !== "played") return false;
-        if (!hasMoodOverlap(moodTags, item.context_tags)) return false;
-        const diff = nowMs - new Date(item.created_at).getTime();
-        return diff <= 14 * 24 * 60 * 60 * 1000;
-      });
-
-      const moodBoost = moodTags.reduce((count, moodTag) => {
-        const keywords = moodRelatedGenreKeywords[moodTag] ?? [];
-        if (keywords.length === 0) return count;
-        const hit = game.genre_tags.some((genre) => keywords.some((keyword) => genre.includes(keyword)));
-        return count + (hit ? 1 : 0);
-      }, 0);
+      const notNowCount = history.filter((item) => item.action === "not_now").length;
 
       score += likeCount * 9;
-      score -= notNowCount * 4;
+      score += playedCount * 2;
+      score -= notNowCount * 5;
       score -= shownCount * 0.8;
-      score += moodBoost * 2.5;
-      if (playedRecently) score -= 10;
 
       return { game, score };
     })

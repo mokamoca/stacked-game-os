@@ -35,12 +35,6 @@ const GENRE_OPTIONS = [
   { key: "indie", label: "INDIE" }
 ] as const;
 
-function parseTimeBucket(raw?: string): number {
-  const value = Number(raw);
-  if ([15, 30, 60, 120].includes(value)) return value;
-  return 30;
-}
-
 function firstValue(raw: SearchValue): string {
   if (typeof raw === "string") return raw;
   if (Array.isArray(raw) && raw.length > 0) return raw[0] ?? "";
@@ -68,13 +62,19 @@ function normalizeSelected(raw: SearchValue, allowed: string[]): string[] {
   return normalized;
 }
 
+function formatReleaseDate(raw: string): string {
+  if (!raw) return "不明";
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return "不明";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 async function recordShownInteractions(params: {
   userId: string;
   recommendations: ExternalGame[];
-  timeBucket: number;
   moodTags: string;
 }) {
-  const { userId, recommendations, timeBucket, moodTags } = params;
+  const { userId, recommendations, moodTags } = params;
   if (recommendations.length === 0) return;
 
   const supabase = createClient();
@@ -85,7 +85,7 @@ async function recordShownInteractions(params: {
     external_game_id: game.external_game_id,
     game_title_snapshot: game.title,
     action: "shown",
-    time_bucket: timeBucket,
+    time_bucket: 30,
     context_tags: moodTags
   }));
 
@@ -111,7 +111,6 @@ export default async function DashboardPage({ searchParams }: Props) {
   const selectedGenres = normalizeSelected(searchParams.genre, genreKeys);
 
   const mood = selectedMoodPresets.join(", ");
-  const timeBucket = parseTimeBucket(firstValue(searchParams.time));
   const message = firstValue(searchParams.message);
   const error = firstValue(searchParams.error);
 
@@ -139,7 +138,6 @@ export default async function DashboardPage({ searchParams }: Props) {
   await recordShownInteractions({
     userId: user.id,
     recommendations,
-    timeBucket,
     moodTags: mood
   });
 
@@ -147,14 +145,14 @@ export default async function DashboardPage({ searchParams }: Props) {
   for (const preset of selectedMoodPresets) returnParams.append("mood_preset", preset);
   for (const platform of selectedPlatforms) returnParams.append("platform", platform);
   for (const genre of selectedGenres) returnParams.append("genre", genre);
-  if (timeBucket !== 30 || returnParams.toString()) returnParams.set("time", String(timeBucket));
   const returnTo = returnParams.toString() ? `/?${returnParams.toString()}` : "/";
 
   return (
     <div className="stack">
       <section className="card">
         <h1>今日の1本を決める</h1>
-        <p className="muted">外部ゲームDBから候補を取得し、気分・プラットフォーム・ジャンル・時間でおすすめを最大3本表示します。</p>
+        <p className="muted">外部ゲームDBのデータを使って、プラットフォーム・ジャンル中心でおすすめを最大3本表示します。</p>
+        <p className="notice ok">気分プリセットは現在ベータ機能です。現時点では推薦への影響を最小化しています。</p>
 
         {message ? <p className="notice ok">{message}</p> : null}
         {error ? <p className="notice error">{error}</p> : null}
@@ -208,16 +206,6 @@ export default async function DashboardPage({ searchParams }: Props) {
             </div>
           </fieldset>
 
-          <label className="field">
-            <span>遊べる時間</span>
-            <select name="time" defaultValue={String(timeBucket)}>
-              <option value="15">15分</option>
-              <option value="30">30分</option>
-              <option value="60">60分</option>
-              <option value="120">120分</option>
-            </select>
-          </label>
-
           <button type="submit" className="button primary alignEnd">
             更新
           </button>
@@ -238,6 +226,9 @@ export default async function DashboardPage({ searchParams }: Props) {
                 <h3>{game.title}</h3>
                 <p className="muted">{game.platform}</p>
                 <p className="chipLine">ジャンル: {game.genre_tags.length > 0 ? game.genre_tags.join(", ") : "なし"}</p>
+                <p className="chipLine">評価: {game.rating > 0 ? `${game.rating.toFixed(1)} / 5` : "不明"}</p>
+                <p className="chipLine">メタスコア: {game.metacritic > 0 ? String(game.metacritic) : "不明"}</p>
+                <p className="chipLine">発売日: {formatReleaseDate(game.released)}</p>
 
                 <div className="actionsGrid">
                   {[
@@ -251,7 +242,6 @@ export default async function DashboardPage({ searchParams }: Props) {
                       <input type="hidden" name="external_source" value={game.external_source} />
                       <input type="hidden" name="external_game_id" value={game.external_game_id} />
                       <input type="hidden" name="game_title_snapshot" value={game.title} />
-                      <input type="hidden" name="time_bucket" value={String(timeBucket)} />
                       <input type="hidden" name="context_tags" value={mood} />
                       <input type="hidden" name="return_to" value={returnTo} />
                       <button type="submit" className="button">

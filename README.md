@@ -45,8 +45,9 @@ RAWG_API_KEY=YOUR_RAWG_API_KEY
 
 - 認証: `/login`, `/signup`, `/logout` (Email/Password)
 - 保護ルート: `/`, `/games*` は未ログイン時 `/login` へリダイレクト
-- ゲーム管理: `/games`, `/games/new`, `/games/[id]/edit`, 削除（任意機能）
-- ダッシュボード: RAWG候補を気分プリセット + プラットフォーム + ジャンル + プレイ時間で推薦最大3件
+- ゲーム管理: `/games`, `/games/new`, `/games/[id]/edit`（旧機能・利用非推奨）
+- ダッシュボード: RAWG候補をプラットフォーム + ジャンル中心で推薦最大3件
+- 履歴: `/history` で `like / played / not_now / dont_recommend / shown` を確認
 - ワンアクション: `like`, `played`, `not_now`, `dont_recommend` を保存
 - 推薦表示時に `shown` を自動記録
 
