@@ -29,6 +29,14 @@ type HistorySummary = {
   count: number;
 };
 
+type OpenAIErrorPayload = {
+  error?: {
+    message?: string;
+    type?: string;
+    code?: string;
+  };
+};
+
 function compactDate(value: string): string {
   if (!value) return "";
   const d = new Date(value);
@@ -62,6 +70,20 @@ function sanitizeReason(value: string): string {
   const text = value.trim();
   if (!text) return "履歴と条件に合うため";
   return text.length > 70 ? `${text.slice(0, 70)}…` : text;
+}
+
+function parseOpenAIError(raw: string): string {
+  if (!raw) return "";
+  try {
+    const parsed = JSON.parse(raw) as OpenAIErrorPayload;
+    const message = parsed.error?.message?.trim() ?? "";
+    const type = parsed.error?.type?.trim() ?? "";
+    const code = parsed.error?.code?.trim() ?? "";
+    const detail = [code, type, message].filter(Boolean).join(" / ");
+    return detail || "";
+  } catch {
+    return raw.slice(0, 160).trim();
+  }
 }
 
 export async function rerankWithAI(params: AIRerankParams): Promise<AIRerankOutput> {
@@ -127,10 +149,14 @@ export async function rerankWithAI(params: AIRerankParams): Promise<AIRerankOutp
     });
 
     if (!response.ok) {
+      const rawBody = await response.text();
+      const detail = parseOpenAIError(rawBody);
       return {
         rankedIds: params.candidates.map((item) => item.id),
         reasons: {},
-        error: `AI再ランキングに失敗しました (${response.status})`
+        error: detail
+          ? `AI再ランキングに失敗しました (${response.status}): ${detail}`
+          : `AI再ランキングに失敗しました (${response.status})`
       };
     }
 
@@ -168,11 +194,14 @@ export async function rerankWithAI(params: AIRerankParams): Promise<AIRerankOutp
     }
 
     return { rankedIds: ranked, reasons };
-  } catch {
+  } catch (error) {
     return {
       rankedIds: params.candidates.map((item) => item.id),
       reasons: {},
-      error: "AI再ランキング中にエラーが発生したため既存ランキングを使用しました"
+      error:
+        error instanceof Error
+          ? `AI再ランキング中にエラーが発生したため既存ランキングを使用しました: ${error.message}`
+          : "AI再ランキング中にエラーが発生したため既存ランキングを使用しました"
     };
   }
 }
