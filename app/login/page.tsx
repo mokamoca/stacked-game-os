@@ -1,5 +1,6 @@
-﻿import Link from "next/link";
-import { loginAction } from "@/app/auth-actions";
+﻿import AuthForm from "@/app/components/ui/auth-form";
+import styles from "@/app/components/ui/ui.module.css";
+import { loginAction, signupAction } from "@/app/auth-actions";
 
 type Props = {
   searchParams: {
@@ -10,26 +11,9 @@ type Props = {
 
 export default function LoginPage({ searchParams }: Props) {
   return (
-    <section className="card narrow">
-      <h1>Login</h1>
-      {searchParams.message ? <p className="notice ok">{searchParams.message}</p> : null}
-      {searchParams.error ? <p className="notice error">{searchParams.error}</p> : null}
-      <form action={loginAction} className="stack">
-        <label className="field">
-          <span>Email</span>
-          <input type="email" name="email" required />
-        </label>
-        <label className="field">
-          <span>Password</span>
-          <input type="password" name="password" required />
-        </label>
-        <button type="submit" className="button primary">
-          Login
-        </button>
-      </form>
-      <p className="muted">
-        アカウントがない場合は <Link href="/signup">Signup</Link>
-      </p>
+    <section className={styles.authSection}>
+      <AuthForm mode="login" action={loginAction} message={searchParams.message} error={searchParams.error} />
+      <AuthForm mode="signup" action={signupAction} />
     </section>
   );
 }

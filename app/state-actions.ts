@@ -1,4 +1,4 @@
-"use server";
+﻿"use server";
 
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -25,9 +25,7 @@ function normalizeState(input: {
 }) {
   let { liked, played, disliked, dontRecommend } = input;
 
-  // dislike and like cannot coexist.
   if (disliked) liked = false;
-  // dont_recommend implies dislike.
   if (dontRecommend) {
     disliked = true;
     liked = false;
@@ -53,7 +51,7 @@ export async function upsertGameStateAction(formData: FormData) {
   const returnTo = safeReturnTo(getString(formData, "return_to") || "/");
 
   if (!externalSource || !externalGameId) {
-    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent("ゲーム識別子が不足しています")}`);
+    redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent("ゲーム情報の指定が不足しています")}`);
   }
 
   const state = normalizeState({
@@ -139,5 +137,5 @@ export async function deleteGameStateByIdAction(formData: FormData) {
     redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}error=${encodeURIComponent(error.message)}`);
   }
 
-  redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}message=${encodeURIComponent("ゲーム棚から削除しました")}`);
+  redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}message=${encodeURIComponent("ゲームを棚から削除しました")}`);
 }

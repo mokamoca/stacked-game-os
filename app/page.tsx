@@ -8,7 +8,10 @@ import {
 } from "@/lib/external-games";
 import { rerankWithAI } from "@/lib/ai-rerank";
 import RecommendationCardList from "@/app/components/recommendation-card-list";
+import FilterPanel from "@/app/components/ui/filter-panel";
+import MetricsPanel from "@/app/components/ui/metrics-panel";
 import { upsertGameStateAction } from "@/app/state-actions";
+import styles from "@/app/components/ui/ui.module.css";
 import type { Interaction, UserGameState } from "@/lib/types";
 
 type SearchValue = string | string[] | undefined;
@@ -18,10 +21,10 @@ type Props = {
 };
 
 const MOOD_PRESETS = [
-  { key: "chill", label: "まったり" },
-  { key: "story", label: "ストーリー重視" },
-  { key: "brain-off", label: "頭を空っぽで遊ぶ" },
-  { key: "hard", label: "歯ごたえ重視" },
+  { key: "chill", label: "リラックス" },
+  { key: "story", label: "ワクワク" },
+  { key: "brain-off", label: "気軽" },
+  { key: "hard", label: "アクション" },
   { key: "cozy", label: "癒やし" }
 ] as const;
 
@@ -162,9 +165,7 @@ export default async function DashboardPage({ searchParams }: Props) {
     data: { user }
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
   const moodPresetKeys = MOOD_PRESETS.map((item) => item.key);
   const platformKeys = PLATFORM_OPTIONS.map((item) => item.key);
@@ -254,7 +255,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   const personalizedIds = new Set(personalizedRecommendations.map((item) => gameKey(item)));
   const fallbackRecommendations = applyAiOrder(fallbackBase, aiFallback.rankedIds)
     .filter((item) => !personalizedIds.has(gameKey(item)))
-    .slice(0, 3);
+    .slice(0, 4);
 
   await recordShownInteractions({
     userId: user.id,
@@ -282,79 +283,29 @@ export default async function DashboardPage({ searchParams }: Props) {
   }
 
   return (
-    <div className="stack">
-      <section className="hero card">
-        <div>
-          <h1>今日の1本を決める</h1>
-          <p className="muted">次に遊ぶ未プレイ候補を優先して提案します。</p>
-          <p className="muted">遊んだ / おすすめしない / 嫌いにしたゲームは原則除外されます。</p>
-          <p className="muted">同一タイトルの表示は {getShownCooldownHours()} 時間クールダウンで抑制します。</p>
+    <div className={styles.stack}>
+      <FilterPanel
+        moodOptions={[...MOOD_PRESETS]}
+        platformOptions={[...PLATFORM_OPTIONS]}
+        genreOptions={[...GENRE_OPTIONS]}
+        selectedMoodPresets={selectedMoodPresets}
+        selectedPlatforms={selectedPlatforms}
+        selectedGenres={selectedGenres}
+      />
+
+      {message ? <p className={`${styles.notice} ${styles.ok}`}>{message}</p> : null}
+      {error ? <p className={`${styles.notice} ${styles.error}`}>{error}</p> : null}
+      {interactionsError ? <p className={`${styles.notice} ${styles.error}`}>{interactionsError.message}</p> : null}
+      {stateError ? <p className={`${styles.notice} ${styles.error}`}>{stateError.message}</p> : null}
+      {externalResult.error ? <p className={`${styles.notice} ${styles.error}`}>{externalResult.error}</p> : null}
+      {aiWarning ? <p className={`${styles.notice} ${styles.error}`}>{aiWarning}</p> : null}
+
+      <section className={styles.section}>
+        <div className={styles.sectionTitleRow}>
+          <h2 className={styles.sectionTitle}>あなたへのおすすめ</h2>
         </div>
-
-        {message ? <p className="notice ok">{message}</p> : null}
-        {error ? <p className="notice error">{error}</p> : null}
-        {interactionsError ? <p className="notice error">{interactionsError.message}</p> : null}
-        {stateError ? <p className="notice error">{stateError.message}</p> : null}
-        {externalResult.error ? <p className="notice error">{externalResult.error}</p> : null}
-        {aiWarning ? <p className="notice error">{aiWarning}</p> : null}
-
-        <form method="GET" className="rowWrap">
-          <fieldset className="checkGroup grow">
-            <legend>気分プリセット（複数選択）</legend>
-            <div className="checkList">
-              {MOOD_PRESETS.map((item) => (
-                <label key={item.key} className="checkItem">
-                  <input
-                    type="checkbox"
-                    name="mood_preset"
-                    value={item.key}
-                    defaultChecked={selectedMoodPresets.includes(item.key)}
-                  />
-                  <span>{item.label}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset className="checkGroup">
-            <legend>プラットフォーム</legend>
-            <div className="checkList">
-              {PLATFORM_OPTIONS.map((item) => (
-                <label key={item.key} className="checkItem">
-                  <input
-                    type="checkbox"
-                    name="platform"
-                    value={item.key}
-                    defaultChecked={selectedPlatforms.includes(item.key)}
-                  />
-                  <span>{item.label}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <fieldset className="checkGroup">
-            <legend>ジャンル</legend>
-            <div className="checkList">
-              {GENRE_OPTIONS.map((item) => (
-                <label key={item.key} className="checkItem">
-                  <input type="checkbox" name="genre" value={item.key} defaultChecked={selectedGenres.includes(item.key)} />
-                  <span>{item.label}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <button type="submit" className="button primary alignEnd">
-            更新
-          </button>
-        </form>
-      </section>
-
-      <section>
-        <h2>あなたへのおすすめ（行動ベース）</h2>
         {personalizedRecommendations.length === 0 ? (
-          <p className="muted">ゲーム棚の状態に合う未プレイ候補が見つかりませんでした。</p>
+          <p className={styles.muted}>未プレイ候補が見つかりませんでした。条件をゆるめて再実行してください。</p>
         ) : (
           <RecommendationCardList
             games={personalizedRecommendations}
@@ -366,10 +317,12 @@ export default async function DashboardPage({ searchParams }: Props) {
         )}
       </section>
 
-      <section>
-        <h2>追加候補</h2>
+      <section className={styles.section}>
+        <div className={styles.sectionTitleRow}>
+          <h2 className={styles.sectionTitle}>追加候補</h2>
+        </div>
         {fallbackRecommendations.length === 0 ? (
-          <p className="muted">追加候補はありません。フィルタ条件を緩めてください。</p>
+          <p className={styles.muted}>追加候補はありません。</p>
         ) : (
           <RecommendationCardList
             games={fallbackRecommendations}
@@ -381,27 +334,15 @@ export default async function DashboardPage({ searchParams }: Props) {
         )}
       </section>
 
-      <section className="card">
-        <h2>推薦指標（全期間）</h2>
-        <div className="metricGrid">
-          <article className="metricCard">
-            <span className="metricLabel">表示数（shown）</span>
-            <strong>{metrics.shown}</strong>
-          </article>
-          <article className="metricCard">
-            <span className="metricLabel">like率</span>
-            <strong>{formatPercent(metrics.likeRate)}</strong>
-          </article>
-          <article className="metricCard">
-            <span className="metricLabel">played率</span>
-            <strong>{formatPercent(metrics.playedRate)}</strong>
-          </article>
-          <article className="metricCard">
-            <span className="metricLabel">dont_recommend率</span>
-            <strong>{formatPercent(metrics.dontRecommendRate)}</strong>
-          </article>
-        </div>
-      </section>
+      <MetricsPanel
+        metrics={{
+          shown: metrics.shown,
+          likeRate: formatPercent(metrics.likeRate),
+          playedRate: formatPercent(metrics.playedRate),
+          dontRecommendRate: formatPercent(metrics.dontRecommendRate)
+        }}
+        cooldownHours={getShownCooldownHours()}
+      />
     </div>
   );
 }

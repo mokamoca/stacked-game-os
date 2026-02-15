@@ -1,7 +1,8 @@
 ﻿import type { Metadata } from "next";
-import Link from "next/link";
 import "./globals.css";
 import { createClient } from "@/lib/supabase/server";
+import AppHeader from "@/app/components/ui/app-header";
+import styles from "@/app/components/ui/ui.module.css";
 
 export const metadata: Metadata = {
   title: "Stacked Game OS",
@@ -20,29 +21,9 @@ export default async function RootLayout({
 
   return (
     <html lang="ja">
-      <body>
-        <header className="header">
-          <div className="container headerInner">
-            <Link href="/" className="brand">
-              Stacked Game OS
-            </Link>
-            <nav className="nav">
-              {user ? (
-                <>
-                  <Link href="/">おすすめ</Link>
-                  <Link href="/mypage">マイページ</Link>
-                  <Link href="/logout">ログアウト</Link>
-                </>
-              ) : (
-                <>
-                  <Link href="/login">ログイン</Link>
-                  <Link href="/signup">新規登録</Link>
-                </>
-              )}
-            </nav>
-          </div>
-        </header>
-        <main className="container main">{children}</main>
+      <body className={styles.page}>
+        <AppHeader isAuthenticated={Boolean(user)} />
+        <main className={`${styles.container} ${styles.main}`}>{children}</main>
       </body>
     </html>
   );
