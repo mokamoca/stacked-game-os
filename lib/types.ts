@@ -27,3 +27,17 @@ export type Interaction = {
   context_tags: string;
   created_at: string;
 };
+
+export type UserGameState = {
+  id: string;
+  user_id: string;
+  external_source: string;
+  external_game_id: string;
+  game_title_snapshot: string;
+  liked: boolean;
+  played: boolean;
+  disliked: boolean;
+  dont_recommend: boolean;
+  created_at: string;
+  updated_at: string;
+};

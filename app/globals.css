@@ -204,6 +204,34 @@ a:hover {
   color: #fff;
 }
 
+.button.active {
+  border-width: 2px;
+}
+
+.button.good {
+  border-color: #1f9a52;
+  color: #1f9a52;
+  background: #e9f9ef;
+}
+
+.button.played {
+  border-color: #0e7a88;
+  color: #0e7a88;
+  background: #e8f7fa;
+}
+
+.button.bad {
+  border-color: #b04a17;
+  color: #b04a17;
+  background: #fff2e8;
+}
+
+.button.noReco {
+  border-color: #9d1e49;
+  color: #9d1e49;
+  background: #fff0f6;
+}
+
 .button.danger {
   border-color: var(--danger);
   color: var(--danger);
@@ -300,6 +328,16 @@ a:hover {
   display: grid;
   gap: 0.5rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.toggleGrid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.saveRow {
+  margin-top: 0.6rem;
 }
 
 .listItem {

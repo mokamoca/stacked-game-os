@@ -1,4 +1,4 @@
-﻿import type { Interaction, InteractionAction } from "@/lib/types";
+﻿import type { Interaction, InteractionAction, UserGameState } from "@/lib/types";
 
 type AIRerankCandidate = {
   id: string;
@@ -15,6 +15,7 @@ type AIRerankParams = {
   platformFilters: string[];
   genreFilters: string[];
   interactions: Interaction[];
+  userStates: UserGameState[];
 };
 
 export type AIRerankOutput = {
@@ -66,6 +67,16 @@ function summarizeInteractions(interactions: Interaction[]): HistorySummary[] {
     .slice(0, 20);
 }
 
+function summarizeStates(userStates: UserGameState[]) {
+  return userStates.slice(0, 120).map((item) => ({
+    title: item.game_title_snapshot,
+    liked: item.liked,
+    played: item.played,
+    disliked: item.disliked,
+    dont_recommend: item.dont_recommend
+  }));
+}
+
 function sanitizeReason(value: string): string {
   const text = value.trim();
   if (!text) return "履歴と条件に合うため";
@@ -101,6 +112,7 @@ export async function rerankWithAI(params: AIRerankParams): Promise<AIRerankOutp
   }
 
   const summary = summarizeInteractions(params.interactions);
+  const shelfSummary = summarizeStates(params.userStates);
 
   const payload = {
     model: "gpt-4o-mini",
@@ -110,7 +122,7 @@ export async function rerankWithAI(params: AIRerankParams): Promise<AIRerankOutp
       {
         role: "system",
         content:
-          "あなたはゲーム推薦ランカーです。候補をユーザー嗜好に合わせて順位付けし、短い日本語理由を1行で返してください。必ずJSONのみを返し、余計な文字を含めないでください。"
+          "あなたはゲーム推薦ランカーです。未プレイ候補を優先し、候補を順位付けしてください。必ずJSONのみを返し、余計な文字を含めないでください。"
       },
       {
         role: "user",
@@ -123,7 +135,8 @@ export async function rerankWithAI(params: AIRerankParams): Promise<AIRerankOutp
             mood_presets: params.moodPresets,
             platform_filters: params.platformFilters,
             genre_filters: params.genreFilters,
-            history_summary: summary
+            interaction_summary: summary,
+            user_game_shelf: shelfSummary
           },
           candidates: params.candidates.map((item) => ({
             id: item.id,

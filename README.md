@@ -38,7 +38,7 @@ OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 
 ### スキーマ要点
 
-- `games`, `interactions` の2テーブル
+- `games`, `interactions`, `user_game_states` の3テーブル
 - 両テーブルで RLS 有効化
 - `auth.uid() = user_id` の行のみ SELECT/INSERT/UPDATE/DELETE 可
 - `interactions` はローカルゲーム(`game_id`)または外部ゲーム(`external_source`, `external_game_id`)を記録可
@@ -48,11 +48,12 @@ OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 - 認証: `/login`, `/signup`, `/logout` (Email/Password)
 - 保護ルート: `/`, `/games*` は未ログイン時 `/login` へリダイレクト
 - ゲーム管理: `/games`, `/games/new`, `/games/[id]/edit`（旧機能・利用非推奨）
-- ダッシュボード: RAWG候補をプラットフォーム + ジャンル中心で取得し、AI再ランキングで最大3件表示
+- ダッシュボード: RAWG候補をプラットフォーム + ジャンル中心で取得し、ゲーム棚状態 + AI再ランキングで最大3件表示
+- `played/disliked/dont_recommend` のゲームは原則おすすめから除外
 - ダッシュボード上部に「あなたへのおすすめ（行動ベース）」を表示
 - 48時間の shown クールダウンで同一タイトルの連続表示を抑制
 - 推薦品質指標（shown数 / like率 / played率 / dont_recommend率）を表示
-- マイページ: `/mypage` で `like / played / not_now / dont_recommend / shown` を確認・編集
+- マイページ: `/mypage` で1ゲーム1状態（liked/played/disliked/dont_recommend）を編集
 - ワンアクション: `like`, `played`, `not_now`, `dont_recommend` を保存
 - 推薦表示時に `shown` を自動記録
 
@@ -85,7 +86,7 @@ OPENAI_API_KEY=YOUR_OPENAI_API_KEY
   - レート制限があるため、アプリ側で短時間メモリキャッシュを使用
   - API障害時は候補を空表示し、エラーメッセージを出す
   - 日本語タイトルはRAWG側で常に提供されるわけではないため、取得できない場合は英語タイトルを表示
-  - AI再ランキングはOpenAI API依存のため、キー未設定やAPI障害時は既存スコアリングにフォールバック
+- AI再ランキングはOpenAI API依存のため、キー未設定やAPI障害時は既存スコアリングにフォールバック
 
 ## TODO
 

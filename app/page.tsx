@@ -1,14 +1,15 @@
-﻿import Image from "next/image";
-import { createClient } from "@/lib/supabase/server";
-import { interactionAction } from "@/app/dashboard-actions";
+﻿import { createClient } from "@/lib/supabase/server";
 import {
   fetchExternalGames,
+  getShownCooldownHours,
   rankExternalGames,
   rankPersonalizedExternalGames,
   type ExternalGame
 } from "@/lib/external-games";
 import { rerankWithAI } from "@/lib/ai-rerank";
-import type { Interaction } from "@/lib/types";
+import RecommendationCardList from "@/app/components/recommendation-card-list";
+import { upsertGameStateAction } from "@/app/state-actions";
+import type { Interaction, UserGameState } from "@/lib/types";
 
 type SearchValue = string | string[] | undefined;
 
@@ -68,13 +69,6 @@ function normalizeSelected(raw: SearchValue, allowed: string[]): string[] {
   return normalized;
 }
 
-function formatReleaseDate(raw: string): string {
-  if (!raw) return "不明";
-  const date = new Date(raw);
-  if (Number.isNaN(date.getTime())) return "不明";
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
 function displayTitle(game: ExternalGame): string {
   return game.title_ja || game.title;
 }
@@ -105,17 +99,17 @@ function formatPercent(value: number): string {
   return `${(value * 100).toFixed(1)}%`;
 }
 
-function computeMetrics(interactions: Interaction[]) {
+function computeMetrics(interactions: Interaction[], states: UserGameState[]) {
   const shown = interactions.filter((item) => item.action === "shown").length;
-  const like = interactions.filter((item) => item.action === "like").length;
-  const played = interactions.filter((item) => item.action === "played").length;
-  const dontRecommend = interactions.filter((item) => item.action === "dont_recommend").length;
+  const likedCount = states.filter((item) => item.liked).length;
+  const playedCount = states.filter((item) => item.played).length;
+  const dontCount = states.filter((item) => item.dont_recommend).length;
 
   return {
     shown,
-    likeRate: shown > 0 ? like / shown : 0,
-    playedRate: shown > 0 ? played / shown : 0,
-    dontRecommendRate: shown > 0 ? dontRecommend / shown : 0
+    likeRate: shown > 0 ? likedCount / shown : 0,
+    playedRate: shown > 0 ? playedCount / shown : 0,
+    dontRecommendRate: shown > 0 ? dontCount / shown : 0
   };
 }
 
@@ -142,50 +136,24 @@ async function recordShownInteractions(params: {
   await supabase.from("interactions").insert(toInsert);
 }
 
-function GameCard(params: {
-  game: ExternalGame;
-  mood: string;
-  returnTo: string;
-  aiReason?: string;
-}) {
-  const { game, mood, returnTo, aiReason } = params;
-  return (
-    <article key={gameKey(game)} className="gameCard">
-      {game.image_url ? (
-        <Image src={game.image_url} alt={displayTitle(game)} width={640} height={360} className="gameImage" />
-      ) : null}
-      <div className="gameBody">
-        <h3>{displayTitle(game)}</h3>
-        <p className="metaLine">{game.platform}</p>
-        <p className="chipLine">ジャンル: {game.genre_tags.length > 0 ? game.genre_tags.join(", ") : "なし"}</p>
-        <p className="chipLine">評価: {game.rating > 0 ? `${game.rating.toFixed(1)} / 5` : "不明"}</p>
-        <p className="chipLine">メタスコア: {game.metacritic > 0 ? String(game.metacritic) : "不明"}</p>
-        <p className="chipLine">発売日: {formatReleaseDate(game.released)}</p>
-        {aiReason ? <p className="aiReason">AI理由: {aiReason}</p> : null}
-      </div>
+function statesByKey(states: UserGameState[]) {
+  const map = new Map<string, UserGameState>();
+  for (const state of states) {
+    map.set(`${state.external_source}:${state.external_game_id}`, state);
+  }
+  return map;
+}
 
-      <div className="actionsGrid">
-        {[
-          { action: "like", label: "好き" },
-          { action: "played", label: "遊んだ" },
-          { action: "not_now", label: "今はやめる" },
-          { action: "dont_recommend", label: "今後おすすめしない" }
-        ].map((entry) => (
-          <form key={entry.action} action={interactionAction}>
-            <input type="hidden" name="action" value={entry.action} />
-            <input type="hidden" name="external_source" value={game.external_source} />
-            <input type="hidden" name="external_game_id" value={game.external_game_id} />
-            <input type="hidden" name="game_title_snapshot" value={displayTitle(game)} />
-            <input type="hidden" name="context_tags" value={mood} />
-            <input type="hidden" name="return_to" value={returnTo} />
-            <button type="submit" className="button">
-              {entry.label}
-            </button>
-          </form>
-        ))}
-      </div>
-    </article>
-  );
+function removePlayedOrBlocked(games: ExternalGame[], states: UserGameState[]): ExternalGame[] {
+  const map = statesByKey(states);
+  return games.filter((game) => {
+    const state = map.get(gameKey(game));
+    if (!state) return true;
+    if (state.played) return false;
+    if (state.dont_recommend) return false;
+    if (state.disliked) return false;
+    return true;
+  });
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
@@ -210,30 +178,43 @@ export default async function DashboardPage({ searchParams }: Props) {
   const message = firstValue(searchParams.message);
   const error = firstValue(searchParams.error);
 
-  const { data: interactionRows, error: interactionsError } = await supabase
-    .from("interactions")
-    .select(
-      "id,user_id,game_id,external_source,external_game_id,game_title_snapshot,action,time_bucket,context_tags,created_at"
-    )
-    .eq("user_id", user.id);
+  const [{ data: interactionRows, error: interactionsError }, { data: stateRows, error: stateError }] = await Promise.all([
+    supabase
+      .from("interactions")
+      .select(
+        "id,user_id,game_id,external_source,external_game_id,game_title_snapshot,action,time_bucket,context_tags,created_at"
+      )
+      .eq("user_id", user.id),
+    supabase
+      .from("user_game_states")
+      .select(
+        "id,user_id,external_source,external_game_id,game_title_snapshot,liked,played,disliked,dont_recommend,created_at,updated_at"
+      )
+      .eq("user_id", user.id)
+  ]);
 
   const interactions = (interactionRows ?? []) as Interaction[];
+  const gameStates = (stateRows ?? []) as UserGameState[];
 
   const externalResult = await fetchExternalGames({
     platforms: selectedPlatforms,
     genres: selectedGenres
   });
 
+  const filteredCandidates = removePlayedOrBlocked(externalResult.games, gameStates);
+
   const personalizedBase = rankPersonalizedExternalGames({
-    games: externalResult.games,
+    games: filteredCandidates,
     interactions,
-    limit: 15
+    userStates: gameStates,
+    limit: 18
   });
   const fallbackBase = rankExternalGames({
-    games: externalResult.games,
+    games: filteredCandidates,
     interactions,
+    userStates: gameStates,
     moodTags: selectedMoodPresets,
-    limit: 15
+    limit: 18
   });
 
   const aiPersonalized = await rerankWithAI({
@@ -248,6 +229,7 @@ export default async function DashboardPage({ searchParams }: Props) {
     moodPresets: selectedMoodPresets,
     platformFilters: selectedPlatforms,
     genreFilters: selectedGenres,
+    userStates: gameStates,
     interactions
   });
 
@@ -263,6 +245,7 @@ export default async function DashboardPage({ searchParams }: Props) {
     moodPresets: selectedMoodPresets,
     platformFilters: selectedPlatforms,
     genreFilters: selectedGenres,
+    userStates: gameStates,
     interactions
   });
 
@@ -285,20 +268,33 @@ export default async function DashboardPage({ searchParams }: Props) {
   for (const genre of selectedGenres) returnParams.append("genre", genre);
   const returnTo = returnParams.toString() ? `/?${returnParams.toString()}` : "/";
 
-  const metrics = computeMetrics(interactions);
+  const metrics = computeMetrics(interactions, gameStates);
   const aiWarning = aiPersonalized.error || aiFallback.error;
+
+  const stateMap: Record<string, { liked: boolean; played: boolean; disliked: boolean; dont_recommend: boolean }> = {};
+  for (const state of gameStates) {
+    stateMap[`${state.external_source}:${state.external_game_id}`] = {
+      liked: state.liked,
+      played: state.played,
+      disliked: state.disliked,
+      dont_recommend: state.dont_recommend
+    };
+  }
 
   return (
     <div className="stack">
       <section className="hero card">
         <div>
           <h1>今日の1本を決める</h1>
-          <p className="muted">今の気分と行動履歴から、今日の候補を提案します。</p>
+          <p className="muted">次に遊ぶ未プレイ候補を優先して提案します。</p>
+          <p className="muted">遊んだ / おすすめしない / 嫌いにしたゲームは原則除外されます。</p>
+          <p className="muted">同一タイトルの表示は {getShownCooldownHours()} 時間クールダウンで抑制します。</p>
         </div>
 
         {message ? <p className="notice ok">{message}</p> : null}
         {error ? <p className="notice error">{error}</p> : null}
         {interactionsError ? <p className="notice error">{interactionsError.message}</p> : null}
+        {stateError ? <p className="notice error">{stateError.message}</p> : null}
         {externalResult.error ? <p className="notice error">{externalResult.error}</p> : null}
         {aiWarning ? <p className="notice error">{aiWarning}</p> : null}
 
@@ -358,26 +354,30 @@ export default async function DashboardPage({ searchParams }: Props) {
       <section>
         <h2>あなたへのおすすめ（行動ベース）</h2>
         {personalizedRecommendations.length === 0 ? (
-          <p className="muted">行動履歴が増えると、ここに個人化された候補が表示されます。</p>
+          <p className="muted">ゲーム棚の状態に合う未プレイ候補が見つかりませんでした。</p>
         ) : (
-          <div className="grid">
-            {personalizedRecommendations.map((game) =>
-              GameCard({ game, mood, returnTo, aiReason: aiPersonalized.reasons[gameKey(game)] })
-            )}
-          </div>
+          <RecommendationCardList
+            games={personalizedRecommendations}
+            returnTo={returnTo}
+            aiReasons={aiPersonalized.reasons}
+            initialStates={stateMap}
+            upsertAction={upsertGameStateAction}
+          />
         )}
       </section>
 
       <section>
-        <h2>今日のおすすめ</h2>
+        <h2>追加候補</h2>
         {fallbackRecommendations.length === 0 ? (
-          <p className="muted">候補が見つかりませんでした。フィルタ条件を緩めて再実行してください。</p>
+          <p className="muted">追加候補はありません。フィルタ条件を緩めてください。</p>
         ) : (
-          <div className="grid">
-            {fallbackRecommendations.map((game) =>
-              GameCard({ game, mood, returnTo, aiReason: aiFallback.reasons[gameKey(game)] })
-            )}
-          </div>
+          <RecommendationCardList
+            games={fallbackRecommendations}
+            returnTo={returnTo}
+            aiReasons={aiFallback.reasons}
+            initialStates={stateMap}
+            upsertAction={upsertGameStateAction}
+          />
         )}
       </section>
 

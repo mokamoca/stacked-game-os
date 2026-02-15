@@ -1,35 +1,24 @@
 ﻿import { createClient } from "@/lib/supabase/server";
-import { deleteInteractionAction, updateInteractionAction } from "@/app/mypage/actions";
-import type { Interaction, InteractionAction } from "@/lib/types";
+import { deleteGameStateByIdAction, updateGameStateByIdAction } from "@/app/state-actions";
+import type { UserGameState } from "@/lib/types";
 
 type Props = {
   searchParams: {
-    action?: string;
+    filter?: string;
     error?: string;
     message?: string;
   };
 };
 
-const FILTERS: Array<{ value: "all" | InteractionAction; label: string }> = [
-  { value: "all", label: "すべて（shown除く）" },
-  { value: "like", label: "好き" },
+const FILTERS = [
+  { value: "all", label: "すべて" },
+  { value: "liked", label: "好き" },
   { value: "played", label: "遊んだ" },
-  { value: "not_now", label: "今はやめる" },
-  { value: "dont_recommend", label: "今後おすすめしない" },
-  { value: "shown", label: "表示済み" }
-];
+  { value: "disliked", label: "嫌い" },
+  { value: "dont_recommend", label: "おすすめしない" }
+] as const;
 
-const ACTION_OPTIONS: Array<{ value: InteractionAction; label: string }> = [
-  { value: "like", label: "好き" },
-  { value: "played", label: "遊んだ" },
-  { value: "not_now", label: "今はやめる" },
-  { value: "dont_recommend", label: "今後おすすめしない" },
-  { value: "shown", label: "表示済み" }
-];
-
-function toActionLabel(action: InteractionAction): string {
-  return ACTION_OPTIONS.find((item) => item.value === action)?.label ?? action;
-}
+type FilterValue = (typeof FILTERS)[number]["value"];
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -40,42 +29,42 @@ function formatDate(value: string): string {
   )} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+function isFilter(value: string): value is FilterValue {
+  return FILTERS.some((item) => item.value === value);
+}
+
 export default async function MyPage({ searchParams }: Props) {
   const supabase = createClient();
   const {
     data: { user }
   } = await supabase.auth.getUser();
 
-  if (!user) {
-    return null;
-  }
+  if (!user) return null;
 
-  const selectedAction = FILTERS.some((item) => item.value === searchParams.action) ? searchParams.action ?? "all" : "all";
+  const selectedFilter: FilterValue = isFilter(searchParams.filter ?? "") ? (searchParams.filter as FilterValue) : "all";
 
   let query = supabase
-    .from("interactions")
+    .from("user_game_states")
     .select(
-      "id,user_id,game_id,external_source,external_game_id,game_title_snapshot,action,time_bucket,context_tags,created_at"
+      "id,user_id,external_source,external_game_id,game_title_snapshot,liked,played,disliked,dont_recommend,created_at,updated_at"
     )
     .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(200);
+    .order("updated_at", { ascending: false })
+    .limit(300);
 
-  if (selectedAction === "all") {
-    query = query.neq("action", "shown");
-  } else {
-    query = query.eq("action", selectedAction);
+  if (selectedFilter !== "all") {
+    query = query.eq(selectedFilter, true);
   }
 
   const { data, error } = await query;
-  const rows = (data ?? []) as Interaction[];
+  const rows = (data ?? []) as UserGameState[];
 
-  const returnTo = selectedAction === "all" ? "/mypage" : `/mypage?action=${selectedAction}`;
+  const returnTo = selectedFilter === "all" ? "/mypage" : `/mypage?filter=${selectedFilter}`;
 
   return (
     <section className="stack">
-      <h1>マイページ</h1>
-      <p className="muted">自分で選んだ結果を管理できます。初期表示では「表示済み」を除外しています。</p>
+      <h1>マイページ（ゲーム棚）</h1>
+      <p className="muted">同じゲームは1行で管理します。状態を編集すると棚が更新されます。</p>
 
       {searchParams.message ? <p className="notice ok">{searchParams.message}</p> : null}
       {searchParams.error ? <p className="notice error">{searchParams.error}</p> : null}
@@ -83,8 +72,8 @@ export default async function MyPage({ searchParams }: Props) {
 
       <form method="GET" className="rowWrap">
         <label className="field">
-          <span>アクション絞り込み</span>
-          <select name="action" defaultValue={selectedAction}>
+          <span>表示フィルタ</span>
+          <select name="filter" defaultValue={selectedFilter}>
             {FILTERS.map((item) => (
               <option key={item.value} value={item.value}>
                 {item.label}
@@ -99,41 +88,52 @@ export default async function MyPage({ searchParams }: Props) {
 
       <div className="card">
         {rows.length === 0 ? (
-          <p className="muted">該当する履歴がありません。</p>
+          <p className="muted">該当するゲームがありません。</p>
         ) : (
           <div className="stack">
             {rows.map((item) => (
               <article key={item.id} className="listItem">
                 <div className="stackCompact">
                   <h3>{item.game_title_snapshot || "タイトル未保存"}</h3>
-                  <p className="chipLine">現在のアクション: {toActionLabel(item.action)}</p>
-                  <p className="chipLine">外部ソース: {item.external_source || "なし"}</p>
-                  <p className="chipLine">外部ゲームID: {item.external_game_id || "なし"}</p>
-                  <p className="chipLine">日時: {formatDate(item.created_at)}</p>
+                  <p className="chipLine">好き: {item.liked ? "ON" : "OFF"}</p>
+                  <p className="chipLine">遊んだ: {item.played ? "ON" : "OFF"}</p>
+                  <p className="chipLine">嫌い: {item.disliked ? "ON" : "OFF"}</p>
+                  <p className="chipLine">おすすめしない: {item.dont_recommend ? "ON" : "OFF"}</p>
+                  <p className="chipLine">最終更新: {formatDate(item.updated_at)}</p>
                 </div>
+
                 <div className="stackCompact">
-                  <form action={updateInteractionAction} className="rowWrap">
+                  <form action={updateGameStateByIdAction} className="rowWrap">
                     <input type="hidden" name="id" value={item.id} />
                     <input type="hidden" name="return_to" value={returnTo} />
-                    <label className="field">
-                      <span>アクション変更</span>
-                      <select name="next_action" defaultValue={item.action}>
-                        {ACTION_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+
+                    <label className="checkItem">
+                      <input type="checkbox" name="liked" defaultChecked={item.liked} />
+                      <span>好き</span>
                     </label>
+                    <label className="checkItem">
+                      <input type="checkbox" name="played" defaultChecked={item.played} />
+                      <span>遊んだ</span>
+                    </label>
+                    <label className="checkItem">
+                      <input type="checkbox" name="disliked" defaultChecked={item.disliked} />
+                      <span>嫌い</span>
+                    </label>
+                    <label className="checkItem">
+                      <input type="checkbox" name="dont_recommend" defaultChecked={item.dont_recommend} />
+                      <span>おすすめしない</span>
+                    </label>
+
                     <button type="submit" className="button">
-                      変更を保存
+                      状態を保存
                     </button>
                   </form>
-                  <form action={deleteInteractionAction}>
+
+                  <form action={deleteGameStateByIdAction}>
                     <input type="hidden" name="id" value={item.id} />
                     <input type="hidden" name="return_to" value={returnTo} />
                     <button type="submit" className="button danger">
-                      削除
+                      ゲーム棚から削除
                     </button>
                   </form>
                 </div>

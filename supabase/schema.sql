@@ -60,6 +60,21 @@ create table if not exists public.interactions (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.user_game_states (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  external_source text not null default '',
+  external_game_id text not null default '',
+  game_title_snapshot text not null default '',
+  liked boolean not null default false,
+  played boolean not null default false,
+  disliked boolean not null default false,
+  dont_recommend boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint user_game_states_unique unique (user_id, external_source, external_game_id)
+);
+
 alter table public.interactions
   alter column game_id drop not null;
 
@@ -77,6 +92,7 @@ create index if not exists idx_interactions_user_id on public.interactions(user_
 create index if not exists idx_interactions_game_id on public.interactions(game_id);
 create index if not exists idx_interactions_external_game on public.interactions(user_id, external_source, external_game_id);
 create index if not exists idx_interactions_created_at on public.interactions(created_at desc);
+create index if not exists idx_user_game_states_user on public.user_game_states(user_id, updated_at desc);
 
 create or replace function public.recommend_games(
   p_mood_tags text default '',
@@ -191,6 +207,7 @@ $$;
 
 alter table public.games enable row level security;
 alter table public.interactions enable row level security;
+alter table public.user_game_states enable row level security;
 
 -- games policies
 drop policy if exists games_select_own on public.games;
@@ -277,3 +294,69 @@ create policy interactions_delete_own
   on public.interactions
   for delete
   using (auth.uid() = user_id);
+
+-- user_game_states policies
+drop policy if exists user_game_states_select_own on public.user_game_states;
+create policy user_game_states_select_own
+  on public.user_game_states
+  for select
+  using (auth.uid() = user_id);
+
+drop policy if exists user_game_states_insert_own on public.user_game_states;
+create policy user_game_states_insert_own
+  on public.user_game_states
+  for insert
+  with check (
+    auth.uid() = user_id
+    and coalesce(trim(external_source), '') <> ''
+    and coalesce(trim(external_game_id), '') <> ''
+  );
+
+drop policy if exists user_game_states_update_own on public.user_game_states;
+create policy user_game_states_update_own
+  on public.user_game_states
+  for update
+  using (auth.uid() = user_id)
+  with check (
+    auth.uid() = user_id
+    and coalesce(trim(external_source), '') <> ''
+    and coalesce(trim(external_game_id), '') <> ''
+  );
+
+drop policy if exists user_game_states_delete_own on public.user_game_states;
+create policy user_game_states_delete_own
+  on public.user_game_states
+  for delete
+  using (auth.uid() = user_id);
+
+-- Optional migration: initialize user_game_states from existing interactions.
+insert into public.user_game_states (
+  user_id,
+  external_source,
+  external_game_id,
+  game_title_snapshot,
+  liked,
+  played,
+  disliked,
+  dont_recommend
+)
+select
+  i.user_id,
+  i.external_source,
+  i.external_game_id,
+  max(i.game_title_snapshot) filter (where coalesce(trim(i.game_title_snapshot), '') <> '') as game_title_snapshot,
+  bool_or(i.action = 'like') as liked,
+  bool_or(i.action = 'played') as played,
+  false as disliked,
+  bool_or(i.action = 'dont_recommend') as dont_recommend
+from public.interactions i
+where coalesce(trim(i.external_source), '') <> ''
+  and coalesce(trim(i.external_game_id), '') <> ''
+group by i.user_id, i.external_source, i.external_game_id
+on conflict (user_id, external_source, external_game_id) do update
+set
+  game_title_snapshot = excluded.game_title_snapshot,
+  liked = public.user_game_states.liked or excluded.liked,
+  played = public.user_game_states.played or excluded.played,
+  dont_recommend = public.user_game_states.dont_recommend or excluded.dont_recommend,
+  updated_at = now();

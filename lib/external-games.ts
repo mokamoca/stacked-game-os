@@ -1,4 +1,4 @@
-﻿import type { Interaction } from "@/lib/types";
+﻿import type { Interaction, UserGameState } from "@/lib/types";
 
 type ExternalSource = "rawg";
 
@@ -241,6 +241,14 @@ function collectHistory(interactions: Interaction[]): Map<string, Interaction[]>
   return byKey;
 }
 
+function collectStates(states: UserGameState[]): Map<string, UserGameState> {
+  const map = new Map<string, UserGameState>();
+  for (const state of states) {
+    map.set(externalKey(state.external_source, state.external_game_id), state);
+  }
+  return map;
+}
+
 function latestShownAt(history: Interaction[]): number | null {
   const shown = history
     .filter((item) => item.action === "shown")
@@ -250,59 +258,48 @@ function latestShownAt(history: Interaction[]): number | null {
   return Math.max(...shown);
 }
 
-function scoreGame(params: {
-  game: ExternalGame;
-  history: Interaction[];
-  personalized: boolean;
-}): { score: number; excluded: boolean } {
-  const { game, history, personalized } = params;
-
-  if (history.some((item) => item.action === "dont_recommend")) {
-    return { score: 0, excluded: true };
-  }
-
-  const likeCount = history.filter((item) => item.action === "like").length;
-  const playedCount = history.filter((item) => item.action === "played").length;
-  const notNowCount = history.filter((item) => item.action === "not_now").length;
-  const shownCount = history.filter((item) => item.action === "shown").length;
-
-  let score = game.score_hint;
-  score += likeCount * (personalized ? 14 : 9);
-  score += playedCount * (personalized ? 7 : 3);
-  score -= notNowCount * (personalized ? 8 : 5);
-  score -= shownCount * (personalized ? 0.25 : 1.2);
-
-  const lastShownAt = latestShownAt(history);
-  if (lastShownAt) {
-    const elapsed = Date.now() - lastShownAt;
-    if (elapsed < SHOWN_COOLDOWN_MS) {
-      const hasPositive = likeCount > 0 || playedCount > 0;
-      if (!hasPositive) {
-        return { score: 0, excluded: true };
-      }
-      score -= personalized ? 6 : 10;
-    }
-  }
-
-  return { score, excluded: false };
-}
-
 function rank(params: {
   games: ExternalGame[];
   interactions: Interaction[];
+  userStates: UserGameState[];
   limit: number;
   personalized: boolean;
 }): ExternalGame[] {
-  const { games, interactions, limit, personalized } = params;
-  const byKey = collectHistory(interactions);
+  const { games, interactions, userStates, limit, personalized } = params;
+  const historyByKey = collectHistory(interactions);
+  const stateByKey = collectStates(userStates);
 
   const scored = games
     .map((game) => {
       const key = externalKey(game.external_source, game.external_game_id);
-      const history = byKey.get(key) ?? [];
-      const result = scoreGame({ game, history, personalized });
-      if (result.excluded) return null;
-      return { game, score: result.score };
+      const history = historyByKey.get(key) ?? [];
+      const state = stateByKey.get(key);
+
+      if (state?.dont_recommend) return null;
+      if (state?.played) return null;
+      if (state?.disliked) return null;
+
+      let score = game.score_hint;
+      const likeCount = history.filter((item) => item.action === "like").length;
+      const playedCount = history.filter((item) => item.action === "played").length;
+      const notNowCount = history.filter((item) => item.action === "not_now").length;
+      const shownCount = history.filter((item) => item.action === "shown").length;
+
+      if (state?.liked) score += 8;
+      score += likeCount * (personalized ? 10 : 7);
+      score += playedCount * (personalized ? 4 : 2);
+      score -= notNowCount * (personalized ? 8 : 5);
+      score -= shownCount * (personalized ? 0.2 : 0.8);
+
+      const lastShown = latestShownAt(history);
+      if (lastShown) {
+        const elapsed = Date.now() - lastShown;
+        if (elapsed < SHOWN_COOLDOWN_MS) {
+          score -= personalized ? 8 : 12;
+        }
+      }
+
+      return { game, score };
     })
     .filter((item): item is { game: ExternalGame; score: number } => item !== null);
 
@@ -313,12 +310,14 @@ function rank(params: {
 export function rankExternalGames(params: {
   games: ExternalGame[];
   interactions: Interaction[];
+  userStates: UserGameState[];
   moodTags: string[];
   limit: number;
 }): ExternalGame[] {
   return rank({
     games: params.games,
     interactions: params.interactions,
+    userStates: params.userStates,
     limit: params.limit,
     personalized: false
   });
@@ -327,11 +326,13 @@ export function rankExternalGames(params: {
 export function rankPersonalizedExternalGames(params: {
   games: ExternalGame[];
   interactions: Interaction[];
+  userStates: UserGameState[];
   limit: number;
 }): ExternalGame[] {
   return rank({
     games: params.games,
     interactions: params.interactions,
+    userStates: params.userStates,
     limit: params.limit,
     personalized: true
   });
