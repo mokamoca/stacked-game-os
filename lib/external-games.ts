@@ -32,6 +32,37 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_RESULTS = 24;
 const SHOWN_COOLDOWN_HOURS = 48;
 const SHOWN_COOLDOWN_MS = SHOWN_COOLDOWN_HOURS * 60 * 60 * 1000;
+const DETAIL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const NON_BASE_TITLE_PATTERNS = [
+  /\bdlc\b/i,
+  /\bseason\s*pass\b/i,
+  /\bsoundtrack\b/i,
+  /\bart\s*book\b/i,
+  /\bupgrade\b/i,
+  /\bexpansion\b/i,
+  /\bexpansion\s*pass\b/i,
+  /\bbundle\b/i,
+  /\bpack\b/i,
+  /\bdemo\b/i,
+  /\bbeta\b/i,
+  /\btest\b/i,
+  /\bdeluxe\b/i,
+  /\bgold\b/i,
+  /\bultimate\b/i,
+  /\bcomplete\b/i,
+  /\bdefinitive\b/i,
+  /\bgoty\b/i,
+  /\bedition\b/i,
+  /追加コンテンツ/,
+  /拡張パック/,
+  /サウンドトラック/,
+  /アートブック/,
+  /シーズンパス/,
+  /体験版/,
+  /デモ版/,
+  /セット/,
+  /パック/
+];
 
 const RAWG_PLATFORM_MAP: Record<string, number> = {
   pc: 4,
@@ -56,6 +87,7 @@ type CacheItem = {
 };
 
 const localCache = new Map<string, CacheItem>();
+const baseGameDetailCache = new Map<string, { expiresAt: number; isBaseGame: boolean }>();
 
 type RawgGame = {
   id: number;
@@ -72,6 +104,11 @@ type RawgGame = {
 
 type RawgResponse = {
   results?: RawgGame[];
+};
+
+type RawgGameDetail = {
+  id: number;
+  parent_game?: { id?: number } | null;
 };
 
 function normalizeQuery(values: string[]): string[] {
@@ -107,8 +144,71 @@ function putCache(key: string, value: FetchResult) {
   });
 }
 
+function fromBaseGameDetailCache(key: string): boolean | null {
+  const hit = baseGameDetailCache.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expiresAt) {
+    baseGameDetailCache.delete(key);
+    return null;
+  }
+  return hit.isBaseGame;
+}
+
+function putBaseGameDetailCache(key: string, isBaseGame: boolean) {
+  baseGameDetailCache.set(key, {
+    expiresAt: Date.now() + DETAIL_CACHE_TTL_MS,
+    isBaseGame
+  });
+}
+
 function externalKey(source: string, id: string): string {
   return `${source}:${id}`;
+}
+
+function titleLooksLikeNonBaseGame(title: string): boolean {
+  const value = title.trim();
+  if (!value) return false;
+  return NON_BASE_TITLE_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+async function isBaseGameByRawgDetail(params: { apiKey: string; gameId: number; title: string }): Promise<boolean> {
+  const { apiKey, gameId, title } = params;
+  const cacheKey = String(gameId);
+  const cached = fromBaseGameDetailCache(cacheKey);
+  if (cached !== null) return cached;
+
+  if (titleLooksLikeNonBaseGame(title)) {
+    putBaseGameDetailCache(cacheKey, false);
+    return false;
+  }
+
+  try {
+    const qs = new URLSearchParams({ key: apiKey });
+    const response = await fetch(`${RAWG_ENDPOINT}/${gameId}?${qs.toString()}`, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
+      },
+      next: { revalidate: 3600 }
+    });
+
+    if (!response.ok) {
+      // Fail-open on detail fetch failure to avoid dropping all recommendations.
+      const fallback = !titleLooksLikeNonBaseGame(title);
+      putBaseGameDetailCache(cacheKey, fallback);
+      return fallback;
+    }
+
+    const detail = (await response.json()) as RawgGameDetail;
+    const isBaseGame = !detail.parent_game?.id;
+    putBaseGameDetailCache(cacheKey, isBaseGame);
+    return isBaseGame;
+  } catch {
+    const fallback = !titleLooksLikeNonBaseGame(title);
+    putBaseGameDetailCache(cacheKey, fallback);
+    return fallback;
+  }
 }
 
 function hasJapanese(text: string): boolean {
@@ -218,7 +318,17 @@ export async function fetchExternalGames(params: FetchParams): Promise<FetchResu
     }
 
     const payload = (await response.json()) as RawgResponse;
-    const games = (payload.results ?? []).map(mapRawgGame);
+    const rawGames = payload.results ?? [];
+    const baseFlags = await Promise.all(
+      rawGames.map((game) =>
+        isBaseGameByRawgDetail({
+          apiKey,
+          gameId: game.id,
+          title: game.name ?? ""
+        })
+      )
+    );
+    const games = rawGames.filter((_, index) => baseFlags[index]).map(mapRawgGame);
     const success = { games };
     putCache(key, success);
     return success;

@@ -122,12 +122,26 @@ export async function rerankWithAI(params: AIRerankParams): Promise<AIRerankOutp
       {
         role: "system",
         content:
-          "あなたはゲーム推薦ランカーです。未プレイ候補を優先し、候補を順位付けしてください。必ずJSONのみを返し、余計な文字を含めないでください。"
+          "あなたはゲーム推薦ランカーです。候補はRAWGのAPI判定で本編優先に絞られていますが、DLC・拡張・バンドル・上位エディションを推薦しない方針を厳守してください。未プレイ候補を優先し、候補を順位付けしてください。必ずJSONのみを返し、余計な文字を含めないでください。"
       },
       {
         role: "user",
         content: JSON.stringify({
           task: "候補IDを重複なく並べ替える",
+          ranking_constraints: {
+            base_game_only: true,
+            exclude_types: [
+              "dlc",
+              "expansion",
+              "bundle",
+              "edition",
+              "season_pass",
+              "soundtrack",
+              "demo",
+              "beta"
+            ],
+            uncertain_items: "exclude"
+          },
           output_schema: {
             ranked: [{ id: "candidate_id", reason: "1行理由", score: 0 }]
           },

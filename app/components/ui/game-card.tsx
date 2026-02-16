@@ -16,9 +16,7 @@ type Props = {
   game: ExternalGame;
   state: CardState;
   reason?: string;
-  returnTo: string;
   onToggle: (field: keyof CardState) => void;
-  upsertAction: (formData: FormData) => void | Promise<void>;
 };
 
 function displayTitle(game: ExternalGame): string {
@@ -32,7 +30,7 @@ function formatReleaseDate(raw: string): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export default function GameCard({ game, state, reason, returnTo, onToggle, upsertAction }: Props) {
+export default function GameCard({ game, state, reason, onToggle }: Props) {
   return (
     <article className={styles.gameCard}>
       {game.image_url ? (
@@ -52,20 +50,6 @@ export default function GameCard({ game, state, reason, returnTo, onToggle, upse
       </div>
 
       <StateToggleGroup state={state} onToggle={onToggle} />
-
-      <form action={upsertAction} className={styles.saveRow}>
-        <input type="hidden" name="external_source" value={game.external_source} />
-        <input type="hidden" name="external_game_id" value={game.external_game_id} />
-        <input type="hidden" name="game_title_snapshot" value={displayTitle(game)} />
-        <input type="hidden" name="liked" value={String(state.liked)} />
-        <input type="hidden" name="played" value={String(state.played)} />
-        <input type="hidden" name="disliked" value={String(state.disliked)} />
-        <input type="hidden" name="dont_recommend" value={String(state.dont_recommend)} />
-        <input type="hidden" name="return_to" value={returnTo} />
-        <button type="submit" className={`${styles.button} ${styles.buttonPrimary}`}>
-          保存
-        </button>
-      </form>
     </article>
   );
 }

@@ -10,7 +10,6 @@ import { rerankWithAI } from "@/lib/ai-rerank";
 import RecommendationCardList from "@/app/components/recommendation-card-list";
 import FilterPanel from "@/app/components/ui/filter-panel";
 import MetricsPanel from "@/app/components/ui/metrics-panel";
-import { upsertGameStateAction } from "@/app/state-actions";
 import styles from "@/app/components/ui/ui.module.css";
 import type { Interaction, UserGameState } from "@/lib/types";
 
@@ -263,12 +262,6 @@ export default async function DashboardPage({ searchParams }: Props) {
     moodTags: mood
   });
 
-  const returnParams = new URLSearchParams();
-  for (const preset of selectedMoodPresets) returnParams.append("mood_preset", preset);
-  for (const platform of selectedPlatforms) returnParams.append("platform", platform);
-  for (const genre of selectedGenres) returnParams.append("genre", genre);
-  const returnTo = returnParams.toString() ? `/?${returnParams.toString()}` : "/";
-
   const metrics = computeMetrics(interactions, gameStates);
   const aiWarning = aiPersonalized.error || aiFallback.error;
 
@@ -309,10 +302,8 @@ export default async function DashboardPage({ searchParams }: Props) {
         ) : (
           <RecommendationCardList
             games={personalizedRecommendations}
-            returnTo={returnTo}
             aiReasons={aiPersonalized.reasons}
             initialStates={stateMap}
-            upsertAction={upsertGameStateAction}
           />
         )}
       </section>
@@ -326,10 +317,8 @@ export default async function DashboardPage({ searchParams }: Props) {
         ) : (
           <RecommendationCardList
             games={fallbackRecommendations}
-            returnTo={returnTo}
             aiReasons={aiFallback.reasons}
             initialStates={stateMap}
-            upsertAction={upsertGameStateAction}
           />
         )}
       </section>
