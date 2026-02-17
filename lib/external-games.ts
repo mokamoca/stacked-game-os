@@ -33,6 +33,7 @@ const MAX_RESULTS = 24;
 const SHOWN_COOLDOWN_HOURS = 48;
 const SHOWN_COOLDOWN_MS = SHOWN_COOLDOWN_HOURS * 60 * 60 * 1000;
 const DETAIL_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const RAWG_DETAIL_TIMEOUT_MS = 1200;
 const NON_BASE_TITLE_PATTERNS = [
   /\bdlc\b/i,
   /\bseason\s*pass\b/i,
@@ -184,13 +185,18 @@ async function isBaseGameByRawgDetail(params: { apiKey: string; gameId: number; 
 
   try {
     const qs = new URLSearchParams({ key: apiKey });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), RAWG_DETAIL_TIMEOUT_MS);
     const response = await fetch(`${RAWG_ENDPOINT}/${gameId}?${qs.toString()}`, {
       method: "GET",
       headers: {
         Accept: "application/json",
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8"
       },
+      signal: controller.signal,
       next: { revalidate: 3600 }
+    }).finally(() => {
+      clearTimeout(timer);
     });
 
     if (!response.ok) {

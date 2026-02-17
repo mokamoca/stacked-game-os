@@ -19,6 +19,8 @@ type Props = {
   searchParams: Record<string, SearchValue>;
 };
 
+const AI_CANDIDATE_LIMIT = 12;
+
 const MOOD_PRESETS = [
   { key: "chill", label: "リラックス" },
   { key: "story", label: "ワクワク" },
@@ -159,6 +161,7 @@ function removePlayedOrBlocked(games: ExternalGame[], states: UserGameState[]): 
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
+  const requestStart = Date.now();
   const supabase = createClient();
   const {
     data: { user }
@@ -178,6 +181,7 @@ export default async function DashboardPage({ searchParams }: Props) {
   const message = firstValue(searchParams.message);
   const error = firstValue(searchParams.error);
 
+  const dbStart = Date.now();
   const [{ data: interactionRows, error: interactionsError }, { data: stateRows, error: stateError }] = await Promise.all([
     supabase
       .from("interactions")
@@ -192,14 +196,17 @@ export default async function DashboardPage({ searchParams }: Props) {
       )
       .eq("user_id", user.id)
   ]);
+  const dbMs = Date.now() - dbStart;
 
   const interactions = (interactionRows ?? []) as Interaction[];
   const gameStates = (stateRows ?? []) as UserGameState[];
 
+  const externalStart = Date.now();
   const externalResult = await fetchExternalGames({
     platforms: selectedPlatforms,
     genres: selectedGenres
   });
+  const externalMs = Date.now() - externalStart;
 
   const filteredCandidates = removePlayedOrBlocked(externalResult.games, gameStates);
 
@@ -207,47 +214,50 @@ export default async function DashboardPage({ searchParams }: Props) {
     games: filteredCandidates,
     interactions,
     userStates: gameStates,
-    limit: 18
+    limit: AI_CANDIDATE_LIMIT
   });
   const fallbackBase = rankExternalGames({
     games: filteredCandidates,
     interactions,
     userStates: gameStates,
     moodTags: selectedMoodPresets,
-    limit: 18
+    limit: AI_CANDIDATE_LIMIT
   });
 
-  const aiPersonalized = await rerankWithAI({
-    candidates: personalizedBase.map((game) => ({
-      id: gameKey(game),
-      title: displayTitle(game),
-      platform: game.platform,
-      genres: game.genre_tags,
-      rating: game.rating,
-      released: game.released
-    })),
-    moodPresets: selectedMoodPresets,
-    platformFilters: selectedPlatforms,
-    genreFilters: selectedGenres,
-    userStates: gameStates,
-    interactions
-  });
-
-  const aiFallback = await rerankWithAI({
-    candidates: fallbackBase.map((game) => ({
-      id: gameKey(game),
-      title: displayTitle(game),
-      platform: game.platform,
-      genres: game.genre_tags,
-      rating: game.rating,
-      released: game.released
-    })),
-    moodPresets: selectedMoodPresets,
-    platformFilters: selectedPlatforms,
-    genreFilters: selectedGenres,
-    userStates: gameStates,
-    interactions
-  });
+  const aiStart = Date.now();
+  const [aiPersonalized, aiFallback] = await Promise.all([
+    rerankWithAI({
+      candidates: personalizedBase.map((game) => ({
+        id: gameKey(game),
+        title: displayTitle(game),
+        platform: game.platform,
+        genres: game.genre_tags,
+        rating: game.rating,
+        released: game.released
+      })),
+      moodPresets: selectedMoodPresets,
+      platformFilters: selectedPlatforms,
+      genreFilters: selectedGenres,
+      userStates: gameStates,
+      interactions
+    }),
+    rerankWithAI({
+      candidates: fallbackBase.map((game) => ({
+        id: gameKey(game),
+        title: displayTitle(game),
+        platform: game.platform,
+        genres: game.genre_tags,
+        rating: game.rating,
+        released: game.released
+      })),
+      moodPresets: selectedMoodPresets,
+      platformFilters: selectedPlatforms,
+      genreFilters: selectedGenres,
+      userStates: gameStates,
+      interactions
+    })
+  ]);
+  const aiMs = Date.now() - aiStart;
 
   const personalizedRecommendations = applyAiOrder(personalizedBase, aiPersonalized.rankedIds).slice(0, 3);
 
@@ -256,11 +266,13 @@ export default async function DashboardPage({ searchParams }: Props) {
     .filter((item) => !personalizedIds.has(gameKey(item)))
     .slice(0, 4);
 
+  const shownInsertStart = Date.now();
   await recordShownInteractions({
     userId: user.id,
     recommendations: [...personalizedRecommendations, ...fallbackRecommendations],
     moodTags: mood
   });
+  const shownInsertMs = Date.now() - shownInsertStart;
 
   const metrics = computeMetrics(interactions, gameStates);
   const aiWarning = aiPersonalized.error || aiFallback.error;
@@ -274,6 +286,10 @@ export default async function DashboardPage({ searchParams }: Props) {
       dont_recommend: state.dont_recommend
     };
   }
+
+  console.info(
+    `[perf][dashboard] total=${Date.now() - requestStart}ms db=${dbMs}ms external=${externalMs}ms ai=${aiMs}ms shown_insert=${shownInsertMs}ms interactions=${interactions.length} states=${gameStates.length}`
+  );
 
   return (
     <div className={styles.stack}>
