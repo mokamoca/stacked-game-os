@@ -65,12 +65,17 @@ const NON_BASE_TITLE_PATTERNS = [
   /パック/
 ];
 
-const RAWG_PLATFORM_MAP: Record<string, number> = {
-  pc: 4,
-  playstation: 18,
-  switch: 7,
-  xbox: 1,
-  mobile: 3
+const RAWG_PLATFORM_MAP: Record<string, number[]> = {
+  ps4: [18],
+  ps5: [187],
+  switch: [7],
+  switch2: [7],
+  steam: [4],
+  "xbox-series": [186],
+  playstation: [18, 187],
+  pc: [4],
+  xbox: [186, 1],
+  mobile: [3]
 };
 
 const RAWG_GENRE_MAP: Record<string, string> = {
@@ -222,9 +227,7 @@ function hasJapanese(text: string): boolean {
 }
 
 function toRawgPlatformParam(platforms: string[]): string {
-  const ids = normalizeQuery(platforms)
-    .map((key) => RAWG_PLATFORM_MAP[key])
-    .filter((value): value is number => typeof value === "number");
+  const ids = normalizeQuery(platforms).flatMap((key) => RAWG_PLATFORM_MAP[key] ?? []);
   return Array.from(new Set(ids)).join(",");
 }
 
@@ -244,6 +247,18 @@ function recencyBoost(released: string): number {
   if (days <= 365) return 2;
   if (days <= 365 * 2) return 1;
   return 0;
+}
+
+function agePenalty(released: string): number {
+  if (!released) return 0;
+  const releasedMs = new Date(released).getTime();
+  if (Number.isNaN(releasedMs)) return 0;
+  const years = (Date.now() - releasedMs) / (365.25 * 24 * 60 * 60 * 1000);
+  if (years <= 3) return 0;
+  if (years <= 6) return -1.5;
+  if (years <= 9) return -4;
+  if (years <= 12) return -7;
+  return -10;
 }
 
 function mapRawgGame(game: RawgGame): ExternalGame {
@@ -266,7 +281,8 @@ function mapRawgGame(game: RawgGame): ExternalGame {
     rating * 8 +
     Math.min(12, Math.log10(Math.max(1, ratingCount)) * 4) +
     metacritic / 20 +
-    recencyBoost(released);
+    recencyBoost(released) +
+    agePenalty(released);
 
   return {
     external_source: "rawg",

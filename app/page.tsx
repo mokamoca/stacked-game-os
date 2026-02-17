@@ -20,6 +20,10 @@ type Props = {
 };
 
 const AI_CANDIDATE_LIMIT = 12;
+const DEFAULT_PLATFORM_KEYS = ["ps5", "switch", "steam"] as const;
+const INITIAL_MAX_AGE_YEARS = 8;
+const OLD_LOW_SIGNAL_AGE_YEARS = 5;
+const LOW_SIGNAL_RATINGS_COUNT = 120;
 
 const MOOD_PRESETS = [
   { key: "chill", label: "リラックス" },
@@ -30,12 +34,20 @@ const MOOD_PRESETS = [
 ] as const;
 
 const PLATFORM_OPTIONS = [
-  { key: "pc", label: "PC" },
-  { key: "playstation", label: "PlayStation" },
+  { key: "ps5", label: "PS5" },
+  { key: "ps4", label: "PS4" },
   { key: "switch", label: "Switch" },
-  { key: "xbox", label: "Xbox" },
-  { key: "mobile", label: "Mobile" }
+  { key: "switch2", label: "Switch 2 (近似)" },
+  { key: "steam", label: "Steam / PC" },
+  { key: "xbox-series", label: "Xbox Series X|S" }
 ] as const;
+
+const PLATFORM_ALIASES: Record<string, string[]> = {
+  playstation: ["ps4", "ps5"],
+  pc: ["steam"],
+  xbox: ["xbox-series"],
+  mobile: ["mobile"]
+};
 
 const GENRE_OPTIONS = [
   { key: "rpg", label: "RPG" },
@@ -68,6 +80,25 @@ function normalizeSelected(raw: SearchValue, allowed: string[]): string[] {
     if (!item || !allowSet.has(item) || seen.has(item)) continue;
     seen.add(item);
     normalized.push(item);
+  }
+
+  return normalized;
+}
+
+function normalizePlatformSelected(raw: SearchValue, allowed: string[]): string[] {
+  const allowSet = new Set(allowed);
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of toArray(raw)) {
+    const item = value.trim().toLowerCase();
+    if (!item) continue;
+    const mapped = PLATFORM_ALIASES[item] ?? [item];
+    for (const key of mapped) {
+      if (!allowSet.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      normalized.push(key);
+    }
   }
 
   return normalized;
@@ -160,6 +191,28 @@ function removePlayedOrBlocked(games: ExternalGame[], states: UserGameState[]): 
   });
 }
 
+function releaseYear(value: string): number | null {
+  if (!value) return null;
+  const year = new Date(value).getFullYear();
+  if (!Number.isFinite(year)) return null;
+  return year;
+}
+
+function applyFreshnessRules(params: { games: ExternalGame[]; isInitialView: boolean }): ExternalGame[] {
+  const { games, isInitialView } = params;
+  const nowYear = new Date().getFullYear();
+
+  return games.filter((game) => {
+    const year = releaseYear(game.released);
+    if (!year) return true;
+
+    const age = nowYear - year;
+    if (isInitialView && age > INITIAL_MAX_AGE_YEARS) return false;
+    if (age > OLD_LOW_SIGNAL_AGE_YEARS && game.ratings_count < LOW_SIGNAL_RATINGS_COUNT) return false;
+    return true;
+  });
+}
+
 export default async function DashboardPage({ searchParams }: Props) {
   const requestStart = Date.now();
   const supabase = createClient();
@@ -170,12 +223,19 @@ export default async function DashboardPage({ searchParams }: Props) {
   if (!user) return null;
 
   const moodPresetKeys = MOOD_PRESETS.map((item) => item.key);
-  const platformKeys = PLATFORM_OPTIONS.map((item) => item.key);
+  const platformKeys = [...PLATFORM_OPTIONS.map((item) => item.key), "mobile"];
   const genreKeys = GENRE_OPTIONS.map((item) => item.key);
 
   const selectedMoodPresets = normalizeSelected(searchParams.mood_preset, moodPresetKeys);
-  const selectedPlatforms = normalizeSelected(searchParams.platform, platformKeys);
+  const hasPlatformQuery = toArray(searchParams.platform).length > 0;
+  const selectedPlatforms = hasPlatformQuery
+    ? normalizePlatformSelected(searchParams.platform, platformKeys)
+    : [...DEFAULT_PLATFORM_KEYS];
   const selectedGenres = normalizeSelected(searchParams.genre, genreKeys);
+  const hasAnyFilterQuery =
+    toArray(searchParams.mood_preset).length > 0 ||
+    toArray(searchParams.platform).length > 0 ||
+    toArray(searchParams.genre).length > 0;
 
   const mood = selectedMoodPresets.join(", ");
   const message = firstValue(searchParams.message);
@@ -209,15 +269,19 @@ export default async function DashboardPage({ searchParams }: Props) {
   const externalMs = Date.now() - externalStart;
 
   const filteredCandidates = removePlayedOrBlocked(externalResult.games, gameStates);
+  const finalCandidates = applyFreshnessRules({
+    games: filteredCandidates,
+    isInitialView: !hasAnyFilterQuery
+  });
 
   const personalizedBase = rankPersonalizedExternalGames({
-    games: filteredCandidates,
+    games: finalCandidates,
     interactions,
     userStates: gameStates,
     limit: AI_CANDIDATE_LIMIT
   });
   const fallbackBase = rankExternalGames({
-    games: filteredCandidates,
+    games: finalCandidates,
     interactions,
     userStates: gameStates,
     moodTags: selectedMoodPresets,
