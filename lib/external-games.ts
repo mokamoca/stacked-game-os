@@ -1,4 +1,5 @@
 ﻿import type { Interaction, UserGameState } from "@/lib/types";
+import { parseTags } from "@/lib/tags";
 
 type ExternalSource = "rawg";
 
@@ -94,6 +95,62 @@ type CacheItem = {
 
 const localCache = new Map<string, CacheItem>();
 const baseGameDetailCache = new Map<string, { expiresAt: number; isBaseGame: boolean }>();
+const MOOD_GENRE_HINTS: Record<string, string[]> = {
+  chill: ["adventure", "simulation", "puzzle", "casual", "indie", "family"],
+  story: ["adventure", "role-playing", "rpg", "visual novel", "interactive fiction"],
+  "brain-off": ["arcade", "casual", "platformer", "shooter", "indie"],
+  hard: ["action", "fighting", "shooter", "strategy", "souls-like", "roguelike"],
+  cozy: ["simulation", "puzzle", "casual", "family", "indie", "adventure"]
+};
+
+const SCORE_CONFIG = {
+  popularityMaxContribution: {
+    personalized: 10,
+    fallback: 14
+  },
+  interactionLikeWeight: {
+    personalized: 5,
+    fallback: 4
+  },
+  interactionPlayedWeight: {
+    personalized: 2,
+    fallback: 1.5
+  },
+  interactionNotNowWeight: {
+    personalized: -3.5,
+    fallback: -3
+  },
+  interactionShownWeight: {
+    personalized: -1.2,
+    fallback: -1.6
+  },
+  stateLikedBonus: 8,
+  recencyShownPenalty: {
+    personalized: -6,
+    fallback: -9
+  },
+  moodGenreMatchWeight: {
+    personalized: 5,
+    fallback: 4
+  },
+  moodAffinityWeight: {
+    personalized: 1.2,
+    fallback: 0.8
+  },
+  noveltyBonus: {
+    personalized: 2.4,
+    fallback: 1.5
+  },
+  diversityGenrePenalty: {
+    personalized: 2.2,
+    fallback: 1.6
+  },
+  diversityPrimaryGenrePenalty: {
+    personalized: 1.4,
+    fallback: 1
+  },
+  popularityReference: 64
+} as const;
 
 type RawgGame = {
   id: number;
@@ -390,53 +447,287 @@ function latestShownAt(history: Interaction[]): number | null {
   return Math.max(...shown);
 }
 
+type RankedExplanation = {
+  game: ExternalGame;
+  score: number;
+  reasons: string[];
+  matchedMoodKeys: string[];
+};
+
+type RankingMode = "personalized" | "fallback";
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeMoodTags(moodTags: string[]): string[] {
+  return Array.from(
+    new Set(
+      moodTags
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeGenreTags(genreTags: string[]): string[] {
+  return Array.from(
+    new Set(
+      genreTags
+        .map((tag) => tag.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+}
+
+function pickWeight(mode: RankingMode, key: keyof typeof SCORE_CONFIG): number {
+  const value = SCORE_CONFIG[key];
+  if (typeof value === "number") return value;
+  return mode === "personalized" ? value.personalized : value.fallback;
+}
+
+function moodKeysForGame(game: ExternalGame): string[] {
+  const genres = normalizeGenreTags(game.genre_tags);
+  if (genres.length === 0) return [];
+
+  const matched: string[] = [];
+  for (const [moodKey, hints] of Object.entries(MOOD_GENRE_HINTS)) {
+    const isMatch = hints.some((hint) => genres.some((genre) => genre.includes(hint) || hint.includes(genre)));
+    if (isMatch) matched.push(moodKey);
+  }
+  return matched;
+}
+
+function collectMoodAffinity(interactions: Interaction[]): Map<string, number> {
+  const map = new Map<string, number>();
+
+  for (const item of interactions) {
+    const tags = parseTags(item.context_tags ?? "");
+    if (tags.length === 0) continue;
+
+    let actionScore = 0;
+    if (item.action === "like") actionScore = 2;
+    if (item.action === "played") actionScore = 1;
+    if (item.action === "not_now") actionScore = -1;
+    if (item.action === "dont_recommend") actionScore = -3;
+    if (actionScore === 0) continue;
+
+    for (const tag of tags) {
+      const current = map.get(tag) ?? 0;
+      map.set(tag, current + actionScore);
+    }
+  }
+
+  return map;
+}
+
+function preferredMoodTags(inputMoodTags: string[], moodAffinity: Map<string, number>): string[] {
+  const normalized = normalizeMoodTags(inputMoodTags);
+  if (normalized.length > 0) return normalized;
+
+  return Array.from(moodAffinity.entries())
+    .filter(([, score]) => score > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([tag]) => tag);
+}
+
+function countOverlap(source: string[], target: string[]): number {
+  if (source.length === 0 || target.length === 0) return 0;
+  return source.filter((item) => target.includes(item)).length;
+}
+
+function primaryGenre(game: ExternalGame): string {
+  const first = normalizeGenreTags(game.genre_tags)[0];
+  return first ?? "unknown";
+}
+
+function scoreGame(params: {
+  game: ExternalGame;
+  history: Interaction[];
+  state: UserGameState | undefined;
+  moodTags: string[];
+  moodAffinity: Map<string, number>;
+  mode: RankingMode;
+}): RankedExplanation | null {
+  const { game, history, state, moodTags, moodAffinity, mode } = params;
+
+  if (state?.dont_recommend) return null;
+  if (state?.played) return null;
+  if (state?.disliked) return null;
+
+  const reasons: string[] = [];
+  let score = 0;
+
+  const popularityRaw = clamp(game.score_hint / SCORE_CONFIG.popularityReference, 0, 1);
+  const popularityContribution = popularityRaw * pickWeight(mode, "popularityMaxContribution");
+  score += popularityContribution;
+  reasons.push(`人気補助 +${popularityContribution.toFixed(1)}`);
+
+  const likeCount = history.filter((item) => item.action === "like").length;
+  const playedCount = history.filter((item) => item.action === "played").length;
+  const notNowCount = history.filter((item) => item.action === "not_now").length;
+  const shownCount = history.filter((item) => item.action === "shown").length;
+
+  if (state?.liked) {
+    score += SCORE_CONFIG.stateLikedBonus;
+    reasons.push(`棚の「好き」 +${SCORE_CONFIG.stateLikedBonus.toFixed(1)}`);
+  }
+
+  if (likeCount > 0) {
+    const delta = Math.min(3, likeCount) * pickWeight(mode, "interactionLikeWeight");
+    score += delta;
+    reasons.push(`like履歴 +${delta.toFixed(1)}`);
+  }
+
+  if (playedCount > 0) {
+    const delta = Math.min(2, playedCount) * pickWeight(mode, "interactionPlayedWeight");
+    score += delta;
+    reasons.push(`played履歴 +${delta.toFixed(1)}`);
+  }
+
+  if (notNowCount > 0) {
+    const delta = Math.min(3, notNowCount) * pickWeight(mode, "interactionNotNowWeight");
+    score += delta;
+    reasons.push(`not_now履歴 ${delta.toFixed(1)}`);
+  }
+
+  if (shownCount > 0) {
+    const delta = Math.min(4, shownCount) * pickWeight(mode, "interactionShownWeight");
+    score += delta;
+    reasons.push(`shown回数 ${delta.toFixed(1)}`);
+  }
+
+  const lastShown = latestShownAt(history);
+  if (lastShown) {
+    const elapsed = Date.now() - lastShown;
+    if (elapsed < SHOWN_COOLDOWN_MS) {
+      const delta = pickWeight(mode, "recencyShownPenalty");
+      score += delta;
+      reasons.push(`直近表示ペナルティ ${delta.toFixed(1)}`);
+    }
+  }
+
+  const matchedMoodKeys = moodKeysForGame(game);
+  const moodMatchCount = countOverlap(matchedMoodKeys, moodTags);
+  if (moodMatchCount > 0) {
+    const delta = moodMatchCount * pickWeight(mode, "moodGenreMatchWeight");
+    score += delta;
+    reasons.push(`気分一致 +${delta.toFixed(1)} (${moodMatchCount}件)`);
+  }
+
+  if (matchedMoodKeys.length > 0) {
+    const affinityRaw = matchedMoodKeys.reduce((sum, key) => sum + (moodAffinity.get(key) ?? 0), 0);
+    if (affinityRaw !== 0) {
+      const delta = clamp(affinityRaw, -4, 4) * pickWeight(mode, "moodAffinityWeight");
+      score += delta;
+      reasons.push(`ユーザー気分傾向 ${delta >= 0 ? "+" : ""}${delta.toFixed(1)}`);
+    }
+  }
+
+  if (history.length === 0) {
+    const delta = pickWeight(mode, "noveltyBonus");
+    score += delta;
+    reasons.push(`未接触ボーナス +${delta.toFixed(1)}`);
+  }
+
+  return {
+    game,
+    score,
+    reasons,
+    matchedMoodKeys
+  };
+}
+
+function diversifyRankings(params: {
+  scored: RankedExplanation[];
+  limit: number;
+  mode: RankingMode;
+}): RankedExplanation[] {
+  const { scored, limit, mode } = params;
+  const remaining = [...scored].sort((a, b) => b.score - a.score);
+  const selected: RankedExplanation[] = [];
+  const selectedGenres = new Map<string, number>();
+
+  while (remaining.length > 0 && selected.length < Math.max(0, limit)) {
+    let bestIndex = 0;
+    let bestAdjusted = Number.NEGATIVE_INFINITY;
+
+    for (let i = 0; i < remaining.length; i += 1) {
+      const candidate = remaining[i];
+      const genres = normalizeGenreTags(candidate.game.genre_tags);
+      const overlapCount = genres.reduce((sum, tag) => sum + (selectedGenres.has(tag) ? 1 : 0), 0);
+      const primary = primaryGenre(candidate.game);
+      const primaryUsed = selectedGenres.get(primary) ?? 0;
+
+      const diversityPenalty =
+        overlapCount * pickWeight(mode, "diversityGenrePenalty") +
+        primaryUsed * pickWeight(mode, "diversityPrimaryGenrePenalty");
+      const adjusted = candidate.score - diversityPenalty;
+
+      if (adjusted > bestAdjusted) {
+        bestAdjusted = adjusted;
+        bestIndex = i;
+      }
+    }
+
+    const [picked] = remaining.splice(bestIndex, 1);
+    selected.push(picked);
+    for (const genre of normalizeGenreTags(picked.game.genre_tags)) {
+      selectedGenres.set(genre, (selectedGenres.get(genre) ?? 0) + 1);
+    }
+  }
+
+  return selected;
+}
+
 function rank(params: {
   games: ExternalGame[];
   interactions: Interaction[];
   userStates: UserGameState[];
+  moodTags: string[];
   limit: number;
-  personalized: boolean;
-}): ExternalGame[] {
-  const { games, interactions, userStates, limit, personalized } = params;
+  mode: RankingMode;
+}): RankedExplanation[] {
+  const { games, interactions, userStates, moodTags, limit, mode } = params;
   const historyByKey = collectHistory(interactions);
   const stateByKey = collectStates(userStates);
+  const moodAffinity = collectMoodAffinity(interactions);
+  const effectiveMoodTags = preferredMoodTags(moodTags, moodAffinity);
 
   const scored = games
     .map((game) => {
       const key = externalKey(game.external_source, game.external_game_id);
-      const history = historyByKey.get(key) ?? [];
-      const state = stateByKey.get(key);
-
-      if (state?.dont_recommend) return null;
-      if (state?.played) return null;
-      if (state?.disliked) return null;
-
-      let score = game.score_hint;
-      const likeCount = history.filter((item) => item.action === "like").length;
-      const playedCount = history.filter((item) => item.action === "played").length;
-      const notNowCount = history.filter((item) => item.action === "not_now").length;
-      const shownCount = history.filter((item) => item.action === "shown").length;
-
-      if (state?.liked) score += 8;
-      score += likeCount * (personalized ? 10 : 7);
-      score += playedCount * (personalized ? 4 : 2);
-      score -= notNowCount * (personalized ? 8 : 5);
-      score -= shownCount * (personalized ? 0.2 : 0.8);
-
-      const lastShown = latestShownAt(history);
-      if (lastShown) {
-        const elapsed = Date.now() - lastShown;
-        if (elapsed < SHOWN_COOLDOWN_MS) {
-          score -= personalized ? 8 : 12;
-        }
-      }
-
-      return { game, score };
+      return scoreGame({
+        game,
+        history: historyByKey.get(key) ?? [],
+        state: stateByKey.get(key),
+        moodTags: effectiveMoodTags,
+        moodAffinity,
+        mode
+      });
     })
-    .filter((item): item is { game: ExternalGame; score: number } => item !== null);
+    .filter((item): item is RankedExplanation => item !== null);
 
-  scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, Math.max(0, limit)).map((item) => item.game);
+  return diversifyRankings({ scored, limit, mode });
+}
+
+export function explainRankedExternalGames(params: {
+  games: ExternalGame[];
+  interactions: Interaction[];
+  userStates: UserGameState[];
+  moodTags: string[];
+  limit: number;
+  personalized: boolean;
+}): RankedExplanation[] {
+  return rank({
+    games: params.games,
+    interactions: params.interactions,
+    userStates: params.userStates,
+    moodTags: params.moodTags,
+    limit: params.limit,
+    mode: params.personalized ? "personalized" : "fallback"
+  });
 }
 
 export function rankExternalGames(params: {
@@ -446,30 +737,34 @@ export function rankExternalGames(params: {
   moodTags: string[];
   limit: number;
 }): ExternalGame[] {
-  return rank({
+  return explainRankedExternalGames({
     games: params.games,
     interactions: params.interactions,
     userStates: params.userStates,
+    moodTags: params.moodTags,
     limit: params.limit,
     personalized: false
-  });
+  }).map((item) => item.game);
 }
 
 export function rankPersonalizedExternalGames(params: {
   games: ExternalGame[];
   interactions: Interaction[];
   userStates: UserGameState[];
+  moodTags: string[];
   limit: number;
 }): ExternalGame[] {
-  return rank({
+  return explainRankedExternalGames({
     games: params.games,
     interactions: params.interactions,
     userStates: params.userStates,
+    moodTags: params.moodTags,
     limit: params.limit,
     personalized: true
-  });
+  }).map((item) => item.game);
 }
 
 export function getShownCooldownHours(): number {
   return SHOWN_COOLDOWN_HOURS;
 }
+

@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:recommend": "node scripts/recommendation-ranking.test.mjs",
+    "compare:recommend": "node scripts/recommendation-before-after.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",

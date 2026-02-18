@@ -1,4 +1,4 @@
-﻿import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import {
   fetchExternalGames,
   getShownCooldownHours,
@@ -278,6 +278,7 @@ export default async function DashboardPage({ searchParams }: Props) {
     games: finalCandidates,
     interactions,
     userStates: gameStates,
+    moodTags: selectedMoodPresets,
     limit: AI_CANDIDATE_LIMIT
   });
   const fallbackBase = rankExternalGames({
