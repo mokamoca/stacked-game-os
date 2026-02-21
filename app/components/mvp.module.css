@@ -1,0 +1,154 @@
+.stack {
+  display: grid;
+  gap: 1rem;
+}
+
+.panel {
+  border: 1px solid rgba(160, 188, 255, 0.22);
+  border-radius: 16px;
+  padding: 0.95rem;
+  background: linear-gradient(180deg, rgba(17, 33, 82, 0.82), rgba(10, 20, 55, 0.8));
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(1.4rem, 2.5vw, 2rem);
+}
+
+.sub {
+  margin: 0;
+  color: #b2c1ea;
+  font-size: 0.92rem;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.chip {
+  min-height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(160, 188, 255, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  color: #eef3ff;
+  padding: 0.3rem 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chipActive {
+  border-color: rgba(255, 197, 111, 0.55);
+  background: linear-gradient(135deg, rgba(241, 139, 59, 0.72), rgba(169, 82, 255, 0.62));
+}
+
+.grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.card {
+  border: 1px solid rgba(160, 188, 255, 0.22);
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(13, 24, 65, 0.92);
+}
+
+.image {
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+  display: block;
+}
+
+.body {
+  padding: 0.9rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.gameTitle {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.reason {
+  margin: 0;
+  border: 1px solid rgba(118, 170, 255, 0.27);
+  border-radius: 10px;
+  background: rgba(95, 148, 255, 0.17);
+  padding: 0.45rem 0.55rem;
+  line-height: 1.55;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.button {
+  min-height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(160, 188, 255, 0.35);
+  background: rgba(255, 255, 255, 0.05);
+  color: #eef3ff;
+  font-weight: 700;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+
+.buttonPrimary {
+  border-color: rgba(91, 167, 255, 0.65);
+  background: linear-gradient(180deg, #2a89ff, #3554ff);
+}
+
+.error {
+  margin: 0;
+  border-radius: 10px;
+  padding: 0.65rem;
+  border: 1px solid rgba(255, 138, 161, 0.52);
+  background: rgba(215, 63, 94, 0.2);
+}
+
+.empty {
+  margin: 0;
+  color: #b2c1ea;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.select {
+  min-height: 36px;
+  border-radius: 10px;
+  border: 1px solid rgba(160, 188, 255, 0.35);
+  background: rgba(11, 22, 57, 0.9);
+  color: #edf2ff;
+  padding: 0 0.6rem;
+}
+
+.tabRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.listItem {
+  border: 1px solid rgba(160, 188, 255, 0.2);
+  border-radius: 12px;
+  padding: 0.7rem;
+  display: grid;
+  gap: 0.22rem;
+  background: rgba(13, 24, 65, 0.72);
+}

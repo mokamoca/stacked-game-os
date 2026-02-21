@@ -22,7 +22,7 @@ export default function AppHeader({ isAuthenticated }: Props) {
                 おすすめ
               </Link>
               <Link className={styles.navLink} href="/mypage">
-                マイページ
+                マイリスト
               </Link>
               <Link className={styles.navLink} href="/logout">
                 ログアウト
