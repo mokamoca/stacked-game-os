@@ -43,6 +43,7 @@ const RAWG_PLATFORM_MAP: Record<string, string> = {
 
 type ImportBody = {
   pageSize?: number;
+  startPage?: number;
   platforms?: string[];
   sinceYear?: number;
 };
@@ -74,6 +75,10 @@ type PreparedGame = {
   rawPayload: RawgListGame;
 };
 
+type ImportProgressRow = {
+  last_page: number;
+};
+
 function isAuthorized(request: NextRequest): boolean {
   const token = request.headers.get("x-admin-token")?.trim();
   const expected = process.env.ADMIN_IMPORT_TOKEN?.trim();
@@ -103,6 +108,13 @@ function normalizePageSize(value: unknown): number {
   const intValue = Math.floor(value);
   if (intValue <= 0) return 50;
   return Math.min(100, intValue);
+}
+
+function normalizeStartPage(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  const intValue = Math.floor(value);
+  if (intValue <= 0) return 1;
+  return intValue;
 }
 
 function normalizeSinceYear(value: unknown): number {
@@ -163,6 +175,10 @@ function prepareGame(raw: RawgListGame, sinceYear: number): PreparedGame | null 
   };
 }
 
+function buildScopeKey(platformSlugs: string[]): string {
+  return [...platformSlugs].sort().join(",");
+}
+
 async function fetchRawgPage(params: {
   apiKey: string;
   platformIds: number[];
@@ -217,13 +233,38 @@ export async function POST(request: NextRequest) {
   }
 
   const pageSize = normalizePageSize(body.pageSize);
+  const requestedStartPage =
+    typeof body.startPage === "number" && Number.isFinite(body.startPage)
+      ? normalizeStartPage(body.startPage)
+      : null;
   const sinceYear = normalizeSinceYear(body.sinceYear);
   const platformSlugs = normalizePlatforms(body.platforms);
+  const scopeKey = buildScopeKey(platformSlugs);
   const platformIds = Array.from(new Set(platformSlugs.map((slug) => RAWG_PLATFORM_ID_MAP[slug]).filter(Boolean)));
   const perPage = Math.min(pageSize, 40);
 
+  const admin = createAdminClient();
+  let startPage = requestedStartPage ?? 1;
+  if (requestedStartPage == null) {
+    const { data: progressRow, error: progressError } = await admin
+      .from("import_progress")
+      .select("last_page")
+      .eq("provider", "rawg")
+      .eq("scope_key", scopeKey)
+      .eq("since_year", sinceYear)
+      .maybeSingle<ImportProgressRow>();
+
+    if (progressError) {
+      return NextResponse.json({ error: progressError.message }, { status: 500 });
+    }
+    if (progressRow?.last_page && progressRow.last_page > 0) {
+      startPage = progressRow.last_page;
+    }
+  }
+
   const collectedRaw: RawgListGame[] = [];
-  for (let page = 1; page <= MAX_PAGES && collectedRaw.length < pageSize; page += 1) {
+  let lastFetchedPage = startPage;
+  for (let page = startPage; page < startPage + MAX_PAGES && collectedRaw.length < pageSize; page += 1) {
     const payload = await fetchRawgPage({
       apiKey: rawgApiKey,
       platformIds,
@@ -231,6 +272,7 @@ export async function POST(request: NextRequest) {
       perPage,
       sinceYear
     });
+    lastFetchedPage = page;
     const batch = payload.results ?? [];
     if (batch.length === 0) break;
     collectedRaw.push(...batch);
@@ -249,7 +291,6 @@ export async function POST(request: NextRequest) {
     prepared.push(normalized);
   }
 
-  const admin = createAdminClient();
   const externalIds = prepared.map((item) => item.externalId);
 
   const existingByExternal = new Map<string, { game_id: string }>();
@@ -340,6 +381,21 @@ export async function POST(request: NextRequest) {
     } catch {
       skippedCount += 1;
     }
+  }
+
+  const { error: progressUpsertError } = await admin.from("import_progress").upsert(
+    {
+      provider: "rawg",
+      scope_key: scopeKey,
+      since_year: sinceYear,
+      last_page: Math.max(1, lastFetchedPage),
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "provider,scope_key,since_year" }
+  );
+
+  if (progressUpsertError) {
+    return NextResponse.json({ error: progressUpsertError.message }, { status: 500 });
   }
 
   return NextResponse.json({
