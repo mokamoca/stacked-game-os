@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import styles from "@/app/components/mvp.module.css";
 import {
   DISMISS_REASONS,
-  ERA_MODES,
   GENRE_OPTIONS,
   MOOD_OPTIONS,
   PLATFORM_OPTIONS,
@@ -46,11 +45,20 @@ function toggleCode(current: string[] | null, code: string): string[] | null {
   return [...current, code];
 }
 
+function formatFilterSummary(filters: Filters): string {
+  const eraText = filters.era_mode === "ps4_plus" ? "PS4以降" : "レトロも含む";
+  const platformText = filters.platform_codes == null ? "全プラットフォーム" : `${filters.platform_codes.length}件選択`;
+  const genreText = filters.genre_codes == null ? "全ジャンル" : `${filters.genre_codes.length}件選択`;
+  return `${eraText} / ${platformText} / ${genreText}`;
+}
+
 export default function HomeMvp() {
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [selectedMoods, setSelectedMoods] = useState<string[]>([]);
   const [recommendation, setRecommendation] = useState<Recommendation | null>(null);
   const [dismissReason, setDismissReason] = useState<string>(DISMISS_REASONS[0].code);
+  const [dismissOpen, setDismissOpen] = useState<boolean>(false);
+  const [filtersCollapsed, setFiltersCollapsed] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
   const [exhausted, setExhausted] = useState<boolean>(false);
@@ -60,9 +68,7 @@ export default function HomeMvp() {
   const fetchFilters = useCallback(async () => {
     const response = await fetch("/api/filters", { method: "GET", cache: "no-store" });
     const body = (await response.json()) as Filters & { error?: string };
-    if (!response.ok) {
-      throw new Error(body.error ?? "filters_fetch_failed");
-    }
+    if (!response.ok) throw new Error(body.error ?? "filters_fetch_failed");
     return body;
   }, []);
 
@@ -81,6 +87,7 @@ export default function HomeMvp() {
 
       if (!response.ok) throw new Error("error" in body && body.error ? body.error : "recommendation_failed");
 
+      setDismissOpen(false);
       if ("exhausted" in body && body.exhausted) {
         setExhausted(true);
         setRecommendation(null);
@@ -100,7 +107,7 @@ export default function HomeMvp() {
   }, []);
 
   const saveFilters = useCallback(
-    async (nextFilters: Filters, requestNewRecommendation = true) => {
+    async (nextFilters: Filters) => {
       setLoading(true);
       setError("");
       try {
@@ -116,9 +123,7 @@ export default function HomeMvp() {
           genre_codes: body.genre_codes,
           platform_codes: body.platform_codes
         });
-        if (requestNewRecommendation) {
-          await requestNext();
-        }
+        await requestNext();
       } catch (saveError) {
         const message = saveError instanceof Error ? saveError.message : "filters_update_failed";
         setError(message);
@@ -178,14 +183,17 @@ export default function HomeMvp() {
 
   const onEraChange = async (eraMode: EraMode) => {
     if (filters.era_mode === eraMode) return;
+    setFiltersCollapsed(true);
     await saveFilters({ ...filters, era_mode: eraMode });
   };
 
   const onGenreToggle = async (code: string) => {
+    setFiltersCollapsed(true);
     await saveFilters({ ...filters, genre_codes: toggleCode(filters.genre_codes, code) });
   };
 
   const onPlatformToggle = async (code: string) => {
+    setFiltersCollapsed(true);
     await saveFilters({ ...filters, platform_codes: toggleCode(filters.platform_codes, code) });
   };
 
@@ -201,107 +209,128 @@ export default function HomeMvp() {
     const selected = new Set(filters.platform_codes ?? []);
     const addable = PLATFORM_OPTIONS.find((item) => !selected.has(item.code));
     if (!addable) {
-      setError("追加できるプラットフォームがありません");
+      setError("追加できるプラットフォームがありません。");
       return;
     }
     const nextCodes = filters.platform_codes == null ? [addable.code] : [...filters.platform_codes, addable.code];
     await saveFilters({ ...filters, platform_codes: nextCodes });
   };
 
+  const resetFilters = async () => {
+    setSelectedMoods([]);
+    setFiltersCollapsed(false);
+    await saveFilters(INITIAL_FILTERS);
+  };
+
   return (
     <div className={styles.stack}>
       <section className={styles.panel}>
-        <h1 className={styles.title}>今日の1本</h1>
-        <p className={styles.sub}>条件はこの画面のチップで調整できます。</p>
+        <h1 className={styles.title}>今の気分に合う1本を、静かに提案します。</h1>
+        <p className={styles.sub}>1分で決めるための設計です。合わなければ理由だけ選んで次へ進めます。</p>
       </section>
 
       <section className={styles.panel}>
-        <div className={styles.grid}>
-          <p className={styles.sub}>年代</p>
-          <div className={styles.chips}>
-            <button
-              type="button"
-              className={`${styles.chip} ${filters.era_mode === "ps4_plus" ? styles.chipActive : ""}`}
-              onClick={() => void onEraChange("ps4_plus")}
-              disabled={loading}
-            >
-              PS4以降
-            </button>
-            <button
-              type="button"
-              className={`${styles.chip} ${filters.era_mode === "retro_included" ? styles.chipActive : ""}`}
-              onClick={() => void onEraChange("retro_included")}
-              disabled={loading}
-            >
-              レトロも含める
-            </button>
-          </div>
-
-          <p className={styles.sub}>プラットフォーム（未選択=全て）</p>
-          <div className={styles.chips}>
-            {PLATFORM_OPTIONS.map((item) => {
-              const active = filters.platform_codes != null && filters.platform_codes.includes(item.code);
-              return (
-                <button
-                  key={item.code}
-                  type="button"
-                  className={`${styles.chip} ${active ? styles.chipActive : ""}`}
-                  onClick={() => void onPlatformToggle(item.code)}
-                  disabled={loading}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <p className={styles.sub}>ジャンル（未選択=全て）</p>
-          <div className={styles.chips}>
-            {GENRE_OPTIONS.map((item) => {
-              const active = filters.genre_codes != null && filters.genre_codes.includes(item.code);
-              return (
-                <button
-                  key={item.code}
-                  type="button"
-                  className={`${styles.chip} ${active ? styles.chipActive : ""}`}
-                  onClick={() => void onGenreToggle(item.code)}
-                  disabled={loading}
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <p className={styles.sub}>気分（6つ）</p>
-          <div className={styles.chips}>
-            {MOOD_OPTIONS.map((item) => {
-              const active = moodSet.has(item.code);
-              return (
-                <button
-                  key={item.code}
-                  type="button"
-                  className={`${styles.chip} ${active ? styles.chipActive : ""}`}
-                  onClick={() =>
-                    setSelectedMoods((prev) =>
-                      prev.includes(item.code) ? prev.filter((v) => v !== item.code) : [...prev, item.code]
-                    )
-                  }
-                >
-                  {item.label}
-                </button>
-              );
-            })}
-          </div>
+        <div className={styles.headerRow}>
+          <button
+            type="button"
+            className={`${styles.button} ${styles.buttonGhost}`}
+            onClick={() => setFiltersCollapsed((prev) => !prev)}
+            disabled={loading}
+          >
+            {filtersCollapsed ? "条件をひらく" : "条件をたたむ"}
+          </button>
+          <button type="button" className={`${styles.button} ${styles.buttonGhost}`} onClick={() => void resetFilters()} disabled={loading}>
+            条件リセット
+          </button>
         </div>
+
+        {filtersCollapsed ? <p className={styles.sub}>{formatFilterSummary(filters)}</p> : null}
+
+        {!filtersCollapsed ? (
+          <div className={styles.grid}>
+            <p className={styles.sub}>年代</p>
+            <div className={styles.chips}>
+              <button
+                type="button"
+                className={`${styles.chip} ${filters.era_mode === "ps4_plus" ? styles.chipSelected : ""}`}
+                onClick={() => void onEraChange("ps4_plus")}
+                disabled={loading}
+              >
+                PS4以降
+              </button>
+              <button
+                type="button"
+                className={`${styles.chip} ${filters.era_mode === "retro_included" ? styles.chipSelected : ""}`}
+                onClick={() => void onEraChange("retro_included")}
+                disabled={loading}
+              >
+                レトロも含む
+              </button>
+            </div>
+
+            <p className={styles.sub}>プラットフォーム（未選択=全て）</p>
+            <div className={styles.chips}>
+              {PLATFORM_OPTIONS.map((item) => {
+                const active = filters.platform_codes != null && filters.platform_codes.includes(item.code);
+                return (
+                  <button
+                    key={item.code}
+                    type="button"
+                    className={`${styles.chip} ${active ? styles.chipSelected : ""}`}
+                    onClick={() => void onPlatformToggle(item.code)}
+                    disabled={loading}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className={styles.sub}>ジャンル（未選択=全て）</p>
+            <div className={styles.chips}>
+              {GENRE_OPTIONS.map((item) => {
+                const active = filters.genre_codes != null && filters.genre_codes.includes(item.code);
+                return (
+                  <button
+                    key={item.code}
+                    type="button"
+                    className={`${styles.chip} ${active ? styles.chipSelected : ""}`}
+                    onClick={() => void onGenreToggle(item.code)}
+                    disabled={loading}
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className={styles.sub}>気分</p>
+            <div className={styles.chips}>
+              {MOOD_OPTIONS.map((item) => {
+                const active = moodSet.has(item.code);
+                return (
+                  <button
+                    key={item.code}
+                    type="button"
+                    className={`${styles.chip} ${active ? styles.chipSelected : ""}`}
+                    onClick={() =>
+                      setSelectedMoods((prev) => (prev.includes(item.code) ? prev.filter((v) => v !== item.code) : [...prev, item.code]))
+                    }
+                  >
+                    {item.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {error ? <p className={styles.error}>{error}</p> : null}
-      {loading ? <p className={styles.sub}>読み込み中...</p> : null}
 
       {exhausted ? (
         <section className={styles.panel}>
-          <p className={styles.empty}>この条件では未提示の候補が尽きました</p>
+          <p className={styles.empty}>この条件では未提示の候補が尽きました。</p>
           <div className={styles.actions}>
             <button className={styles.button} type="button" onClick={() => void onSuggestion("clear_genres")} disabled={loading}>
               ジャンル解除
@@ -316,21 +345,43 @@ export default function HomeMvp() {
         </section>
       ) : null}
 
-      {!exhausted && recommendation ? (
+      {!exhausted && loading && !recommendation ? (
         <section className={styles.card}>
-          {recommendation.game.cover_url ? (
-            <img className={styles.image} src={recommendation.game.cover_url} alt={recommendation.game.title} />
-          ) : null}
+          <div className={styles.skeletonImage} />
           <div className={styles.body}>
-            <h2 className={styles.gameTitle}>{recommendation.game.title}</h2>
-            <p className={styles.sub}>
-              {recommendation.game.release_year ?? "年不明"} | {recommendation.game.platforms.join(" / ")}
-            </p>
-            <p className={styles.sub}>{recommendation.game.genres.join("・")}</p>
+            <div className={styles.skeletonTitle} />
+            <div className={styles.skeletonLine} />
+            <div className={styles.skeletonLineShort} />
+          </div>
+        </section>
+      ) : null}
+
+      {!exhausted && recommendation ? (
+        <>
+          <section className={styles.card}>
+            {recommendation.game.cover_url ? (
+              <img className={styles.image} src={recommendation.game.cover_url} alt={recommendation.game.title} />
+            ) : (
+              <div className={styles.imagePlaceholder} />
+            )}
+            <div className={styles.body}>
+              <h2 className={styles.gameTitle}>{recommendation.game.title}</h2>
+              <p className={styles.sub}>
+                {recommendation.game.release_year ?? "年不明"} | {recommendation.game.platforms.join(" / ")}
+              </p>
+              <p className={styles.sub}>{recommendation.game.genres.join(" / ")}</p>
+            </div>
+          </section>
+
+          <section className={styles.whyPanel}>
+            <h3 className={styles.whyTitle}>なぜこの1本？</h3>
             <p className={styles.reason}>{recommendation.why_text}</p>
+          </section>
+
+          <section className={styles.panel}>
             <div className={styles.actions}>
               <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => void sendEvent("reroll")} disabled={loading}>
-                リロール
+                次の1本へ
               </button>
               <button className={styles.button} type="button" onClick={() => void sendEvent("wishlist")} disabled={loading}>
                 気になる
@@ -341,26 +392,40 @@ export default function HomeMvp() {
               <button className={styles.button} type="button" onClick={() => void sendEvent("blocked")} disabled={loading}>
                 ブロック
               </button>
-            </div>
-            <div className={styles.row}>
-              <select
-                className={styles.select}
-                value={dismissReason}
-                onChange={(event) => setDismissReason(event.target.value)}
-                disabled={loading}
-              >
-                {DISMISS_REASONS.map((item) => (
-                  <option key={item.code} value={item.code}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <button className={styles.button} type="button" onClick={() => void sendEvent("dismiss", dismissReason)} disabled={loading}>
-                これ違う
+              <button className={styles.button} type="button" onClick={() => setDismissOpen((prev) => !prev)} disabled={loading}>
+                今回は見送る
               </button>
             </div>
+            {dismissOpen ? (
+              <div className={styles.dismissPanel}>
+                <select
+                  className={styles.select}
+                  value={dismissReason}
+                  onChange={(event) => setDismissReason(event.target.value)}
+                  disabled={loading}
+                >
+                  {DISMISS_REASONS.map((item) => (
+                    <option key={item.code} value={item.code}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <button className={styles.button} type="button" onClick={() => void sendEvent("dismiss", dismissReason)} disabled={loading}>
+                  理由を記録して次へ
+                </button>
+              </div>
+            ) : null}
+          </section>
+
+          <div className={styles.stickyAction}>
+            <button className={`${styles.button} ${styles.buttonPrimary}`} type="button" onClick={() => void sendEvent("reroll")} disabled={loading}>
+              次の1本へ
+            </button>
+            <button className={styles.button} type="button" onClick={() => setDismissOpen((prev) => !prev)} disabled={loading}>
+              これ違う
+            </button>
           </div>
-        </section>
+        </>
       ) : null}
     </div>
   );

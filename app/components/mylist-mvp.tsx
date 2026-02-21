@@ -13,10 +13,10 @@ type ListItem = {
   genres: string[];
 };
 
-const TABS: Array<{ status: Status; label: string }> = [
-  { status: "played", label: "遊んだ" },
-  { status: "wishlist", label: "気になる" },
-  { status: "blocked", label: "ブロック" }
+const TABS: Array<{ status: Status; label: string; hint: string }> = [
+  { status: "played", label: "遊んだ", hint: "クリア済み・体験済み" },
+  { status: "wishlist", label: "気になる", hint: "次に検討する候補" },
+  { status: "blocked", label: "ブロック", hint: "今後は表示しない候補" }
 ];
 
 export default function MylistMvp() {
@@ -48,16 +48,19 @@ export default function MylistMvp() {
     void fetchList(status);
   }, [fetchList, status]);
 
+  const currentTab = TABS.find((tab) => tab.status === status) ?? TABS[0];
+
   return (
     <div className={styles.stack}>
       <section className={styles.panel}>
         <h1 className={styles.title}>マイリスト</h1>
+        <p className={styles.sub}>{currentTab.hint}</p>
         <div className={styles.tabRow}>
           {TABS.map((tab) => (
             <button
               key={tab.status}
               type="button"
-              className={`${styles.chip} ${status === tab.status ? styles.chipActive : ""}`}
+              className={`${styles.chip} ${status === tab.status ? styles.chipSelected : ""}`}
               onClick={() => setStatus(tab.status)}
               disabled={loading}
             >
@@ -68,15 +71,15 @@ export default function MylistMvp() {
       </section>
 
       {error ? <p className={styles.error}>{error}</p> : null}
-      {loading ? <p className={styles.sub}>読み込み中...</p> : null}
+      {loading ? <p className={styles.sub}>読み込み中です...</p> : null}
 
       <section className={styles.list}>
         {items.length === 0 ? <p className={styles.empty}>まだ登録はありません。</p> : null}
         {items.map((item) => (
-          <article key={item.id} className={styles.listItem}>
-            <strong>{item.title}</strong>
-            <span className={styles.sub}>
-              {item.release_year ?? "年不明"} | {item.genres.join("・")}
+          <article key={item.id} className={styles.listItemCompact}>
+            <strong className={styles.listTitle}>{item.title}</strong>
+            <span className={styles.listMeta}>
+              {item.release_year ?? "年不明"} / {item.genres.join("・")}
             </span>
           </article>
         ))}

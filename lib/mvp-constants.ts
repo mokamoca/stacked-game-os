@@ -31,17 +31,17 @@ export const PLATFORM_OPTIONS = [
 ] as const;
 
 export const MOOD_OPTIONS = [
-  { code: "focus", label: "集中したい" },
-  { code: "relax", label: "ゆったり" },
-  { code: "story", label: "物語重視" },
-  { code: "challenge", label: "歯ごたえ" },
-  { code: "short", label: "短時間" },
-  { code: "coop", label: "誰かと遊ぶ" }
+  { code: "quick", label: "短時間で満足" },
+  { code: "story", label: "物語に浸る" },
+  { code: "brain", label: "頭を使う" },
+  { code: "power", label: "無双・爽快" },
+  { code: "chill", label: "まったり" },
+  { code: "coop", label: "対戦・協力" }
 ] as const;
 
 export const DISMISS_REASONS = [
   { code: "genre_mismatch", label: "ジャンルが違う" },
   { code: "mood_mismatch", label: "今の気分じゃない" },
-  { code: "too_long", label: "重すぎる・長そう" },
-  { code: "already_considered", label: "既に検討済み" }
+  { code: "too_long", label: "重そう・長そう" },
+  { code: "already_considered", label: "すでに検討した" }
 ] as const;
